@@ -226,6 +226,8 @@ function BookSession({ userId, perfil, onBooked }) {
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [booked, setBooked] = useState({}); // { "2026-11-20": ["09:00", "16:00"] }
+  const [gcalReady, setGcalReady] = useState(null); // null = sin comprobar, true/false = Google Calendar disponible o no
+  const [calendarWarning, setCalendarWarning] = useState(false);
 
   const now = new Date();
   const base = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
@@ -270,7 +272,9 @@ function BookSession({ userId, perfil, onBooked }) {
     setSelectedSlot(null);
   };
 
-  // Carga las sesiones ya agendadas del mes visible para bloquear sus horarios.
+  // Carga las sesiones ya agendadas del mes visible para bloquear sus horarios:
+  // las de Supabase y, si la función de Google Calendar está desplegada,
+  // también los eventos del calendario del estudio.
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("sesiones").select("fecha, hora").gte("fecha", fechaISO(1)).lte("fecha", fechaISO(daysInMonth));
@@ -280,6 +284,26 @@ function BookSession({ userId, perfil, onBooked }) {
         map[s.fecha].push(s.hora);
       });
       setBooked(map);
+      try {
+        const { data: gcal, error: gcalError } = await supabase.functions.invoke("google-calendar", {
+          body: { action: "busy", from: fechaISO(1), to: fechaISO(daysInMonth) },
+        });
+        if (gcalError) throw gcalError;
+        if (gcal && gcal.busy) {
+          setGcalReady(true);
+          setBooked((prev) => {
+            const merged = { ...prev };
+            Object.entries(gcal.busy).forEach(([f, horas]) => {
+              merged[f] = Array.from(new Set([...(merged[f] || []), ...horas]));
+            });
+            return merged;
+          });
+        }
+      } catch {
+        // Sin función de Google Calendar (aún no desplegada): la disponibilidad
+        // sigue siendo la de Supabase. No es un error para el cliente.
+        setGcalReady(false);
+      }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month]);
@@ -296,6 +320,17 @@ function BookSession({ userId, perfil, onBooked }) {
         cliente_id: userId, fecha, hora: selectedSlot, titulo: `Sesión — ${perfil?.show_nombre || "Grabación"}`,
       });
       if (error) throw error;
+      // Agrega la sesión al calendario de Google del estudio (si está conectado).
+      if (gcalReady) {
+        try {
+          const { error: gcalError } = await supabase.functions.invoke("google-calendar", {
+            body: { action: "create", fecha, hora: selectedSlot, titulo: `Sesión — ${perfil?.show_nombre || "Grabación"}`, cliente_nombre: perfil?.nombre, cliente_correo: perfil?.correo },
+          });
+          if (gcalError) setCalendarWarning(true);
+        } catch {
+          setCalendarWarning(true);
+        }
+      }
       setConfirmed(true);
       onBooked && onBooked();
     } catch (err) {
@@ -313,6 +348,11 @@ function BookSession({ userId, perfil, onBooked }) {
         </div>
         <h2 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 23, color: white, marginTop: 18 }}>Sesión confirmada</h2>
         <p style={{ fontFamily: "Inter", fontSize: 14, color: gray, marginTop: 6 }}>{fechaLabel(selectedDay)}, {selectedSlot} hrs</p>
+        {calendarWarning && (
+          <p style={{ fontFamily: "Inter", fontSize: 13, color: "#F3A9A9", marginTop: 12 }}>
+            Sesión guardada, pero no se pudo agregar al calendario de Google. Avisa al estudio para que la anoten.
+          </p>
+        )}
       </div>
     );
   }
