@@ -1,5 +1,11 @@
 # Google Calendar — alta de la integración del portal
 
+**Estado 18 nov 2026: integración completa y en vivo.** Cuenta de servicio
+portal-elite-podhouse@elite-podhouse-reservas.iam.gserviceaccount.com,
+calendario del estudio compartido con ella, secretos guardados en Supabase
+y función desplegada. Lo que sigue es probar una reserva real desde el
+portal. Los pasos de abajo quedan como registro de cómo se dio de alta.
+
 El portal ya trae el código para hablar con Google Calendar (la función
 `supabase/functions/google-calendar` y los cambios en `src/App.jsx`), pero
 para que funcione hay que dar de alta dos cosas que solo se pueden hacer
@@ -19,6 +25,8 @@ con las cuentas de Google y de Supabase del estudio. Son 3 pasos.
    `elitepodhouse@gmail.com`.
 2. Crea un proyecto (o usa uno existente) y activa la **Google Calendar API**
    (APIs y servicios → Biblioteca → Google Calendar API → Habilitar).
+   **Ya existe un proyecto en la cuenta: «Elite Podhouse Reservas»
+   (ID `elite-podhouse-reservas`); úsalo, no crees otro.**
 3. APIs y servicios → Credenciales → Crear credenciales → **Cuenta de servicio**.
    Nombre sugerido: `portal-elite-podhouse`.
 4. Dentro de la cuenta de servicio → Claves → Agregar clave → **Crear clave

@@ -78,6 +78,7 @@ function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [signupDone, setSignupDone] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -92,6 +93,21 @@ function AuthScreen() {
         if (error) throw error;
         if (!data.session) setSignupDone(true);
       }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const forgot = async () => {
+    if (!email) { setError("Escribe tu correo arriba para enviarte el enlace."); return; }
+    setError("");
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      if (error) throw error;
+      setResetSent(true);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -132,6 +148,81 @@ function AuthScreen() {
                 {mode === "login" ? "Regístrate" : "Inicia sesión"}
               </button>
             </p>
+            {mode === "login" && (
+              <p className="text-center mt-3" style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>
+                <button type="button" onClick={forgot} disabled={loading} style={{ color: blueLight, fontWeight: 600 }}>
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </p>
+            )}
+            {resetSent && (
+              <p className="text-center mt-4" style={{ fontFamily: "Inter", fontSize: 13, color: white }}>
+                Te enviamos un correo con el enlace para crear una contraseña nueva. Revisa tu bandeja de entrada.
+              </p>
+            )}
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Restablecer contraseña ----------
+function ResetPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (password.length < 6) { setError("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (password !== confirm) { setError("Las contraseñas no coinciden."); return; }
+    setError("");
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setDone(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const goLogin = async () => {
+    await supabase.auth.signOut();
+    onDone();
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-6" style={{ background: navy }}>
+      <div className="w-full" style={{ maxWidth: 360 }}>
+        <div className="flex flex-col items-center mb-8">
+          <Logo size={44} />
+          <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 22, color: white, marginTop: 14 }}>Élite Podhouse</h1>
+          <p style={{ fontFamily: "Inter", fontSize: 13, color: gray, marginTop: 2 }}>Crea una contraseña nueva</p>
+        </div>
+        {done ? (
+          <div className="text-center">
+            <CheckCircle2 size={28} color={blueLight} className="mx-auto mb-3" />
+            <p style={{ fontFamily: "Inter", fontSize: 14, color: white }}>
+              Contraseña actualizada. Ya puedes entrar con la nueva.
+            </p>
+            <button onClick={goLogin} style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
+              Ir a iniciar sesión
+            </button>
+          </div>
+        ) : (
+          <form onSubmit={submit}>
+            <ErrorBanner message={error} />
+            <Input label="CONTRASEÑA NUEVA" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Mínimo 6 caracteres" />
+            <Input label="REPITE LA CONTRASEÑA" type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="••••••••" />
+            <PillButton full type="submit" disabled={loading}>
+              {loading ? <Loader2 size={15} className="animate-spin" /> : "Guardar contraseña nueva"}
+            </PillButton>
           </form>
         )}
       </div>
@@ -663,10 +754,14 @@ function AdminPortal() {
 // ---------- Root ----------
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = cargando, null = sin sesión
+  const [recovery, setRecovery] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, s) => setSession(s));
+    const { data: listener } = supabase.auth.onAuthStateChange((event, s) => {
+      setSession(s);
+      if (event === "PASSWORD_RECOVERY") setRecovery(true);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -677,6 +772,8 @@ export default function App() {
       </div>
     );
   }
+
+  if (recovery) return <ResetPasswordScreen onDone={() => setRecovery(false)} />;
 
   if (!session) return <AuthScreen />;
 
