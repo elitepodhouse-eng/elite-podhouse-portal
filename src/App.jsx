@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Mic, Calendar as CalIcon, Clock, FileText, LogOut, Menu, X, Radio,
-  ArrowRight, Users, Loader2, AlertCircle, CheckCircle2
+  ArrowRight, Users, Loader2, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { supabase, ADMIN_EMAIL } from "./supabaseClient";
 
@@ -16,7 +16,11 @@ const gray = "#9098B8";
 const red = "#E05D5D";
 
 const PAQUETES = ["Esencia", "Impacto", "Identidad", "Expansión"];
-const SLOTS = ["09:00", "10:30", "12:00", "16:00", "17:30"];
+const SLOTS = ["09:00", "10:30", "12:00", "16:00", "17:30"]; // lun–vie: estudio de 8:00 a 20:00
+const SLOTS_SABADO = ["10:30", "12:00", "16:00"]; // sábados: estudio de 10:00 a 17:00
+const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+// La disponibilidad real sale de la tabla `sesiones` de Supabase: un horario
+// ocupado por cualquier cliente ya no se ofrece. Fase futura: Google Calendar.
 
 // ---------- UI atoms ----------
 function Eyebrow({ children }) {
@@ -215,20 +219,79 @@ function ClientDashboard({ perfil, goTo }) {
 }
 
 function BookSession({ userId, perfil, onBooked }) {
+  const [monthOffset, setMonthOffset] = useState(0); // 0 = mes actual, hasta 2 meses adelante
   const [selectedDay, setSelectedDay] = useState(null);
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [booked, setBooked] = useState({}); // { "2026-11-20": ["09:00", "16:00"] }
 
-  const days = Array.from({ length: 30 }, (_, i) => i + 1);
-  const availableDays = [3, 4, 6, 7, 10, 11, 13, 14, 17, 18, 20, 21, 24, 25, 27, 28]; // TODO: reemplazar con disponibilidad real de Google Calendar
+  const now = new Date();
+  const base = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const year = base.getFullYear();
+  const month = base.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstOffset = (new Date(year, month, 1).getDay() + 6) % 7; // la semana empieza en lunes
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  const fechaISO = (d) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const fechaLabel = (d) => `${d} de ${MESES[month]} de ${year}`;
+  const monthLabel = `${MESES[month][0].toUpperCase()}${MESES[month].slice(1)} ${year}`;
+
+  const slotsForDay = (d) => {
+    const wd = new Date(year, month, d).getDay();
+    if (wd === 0) return []; // domingo: estudio cerrado
+    if (wd === 6) return SLOTS_SABADO;
+    return SLOTS;
+  };
+
+  const freeSlots = (d) => {
+    const taken = new Set(booked[fechaISO(d)] || []);
+    let slots = slotsForDay(d).filter((s) => !taken.has(s));
+    if (fechaISO(d) === todayISO) {
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      slots = slots.filter((s) => {
+        const [h, m] = s.split(":").map(Number);
+        return h * 60 + m > nowMin;
+      });
+    }
+    return slots;
+  };
+
+  const isPast = (d) => fechaISO(d) < todayISO;
+
+  const changeMonth = (delta) => {
+    const next = monthOffset + delta;
+    if (next < 0 || next > 2) return;
+    setMonthOffset(next);
+    setSelectedDay(null);
+    setSelectedSlot(null);
+  };
+
+  // Carga las sesiones ya agendadas del mes visible para bloquear sus horarios.
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("sesiones").select("fecha, hora").gte("fecha", fechaISO(1)).lte("fecha", fechaISO(daysInMonth));
+      const map = {};
+      (data || []).forEach((s) => {
+        if (!map[s.fecha]) map[s.fecha] = [];
+        map[s.fecha].push(s.hora);
+      });
+      setBooked(map);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, month]);
 
   const confirm = async () => {
     setError("");
     setSaving(true);
     try {
-      const fecha = `2026-09-${String(selectedDay).padStart(2, "0")}`;
+      const fecha = fechaISO(selectedDay);
+      // Revisión final: si otro cliente apartó ese horario mientras elegías, no se duplica.
+      const { data: clash } = await supabase.from("sesiones").select("id").eq("fecha", fecha).eq("hora", selectedSlot).limit(1);
+      if (clash && clash.length > 0) throw new Error("Ese horario ya se apartó. Elige otro, por favor.");
       const { error } = await supabase.from("sesiones").insert({
         cliente_id: userId, fecha, hora: selectedSlot, titulo: `Sesión — ${perfil?.show_nombre || "Grabación"}`,
       });
@@ -249,7 +312,7 @@ function BookSession({ userId, perfil, onBooked }) {
           <CheckCircle2 size={28} color={blueLight} />
         </div>
         <h2 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 23, color: white, marginTop: 18 }}>Sesión confirmada</h2>
-        <p style={{ fontFamily: "Inter", fontSize: 14, color: gray, marginTop: 6 }}>{selectedDay} de septiembre, {selectedSlot} hrs</p>
+        <p style={{ fontFamily: "Inter", fontSize: 14, color: gray, marginTop: 6 }}>{fechaLabel(selectedDay)}, {selectedSlot} hrs</p>
       </div>
     );
   }
@@ -258,18 +321,26 @@ function BookSession({ userId, perfil, onBooked }) {
     <div>
       <Eyebrow>AGENDAR SESIÓN</Eyebrow>
       <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Elige fecha y hora</h1>
-      <p style={{ fontFamily: "Inter", fontSize: 13, color: gray, marginTop: 4 }}>Septiembre 2026</p>
+      <div className="flex items-center justify-between mt-4">
+        <button onClick={() => changeMonth(-1)} disabled={monthOffset === 0} className="rounded-full flex items-center justify-center" style={{ width: 32, height: 32, background: monthOffset === 0 ? "transparent" : card, color: monthOffset === 0 ? "#3A3F5C" : white }}>
+          <ChevronLeft size={17} />
+        </button>
+        <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>{monthLabel}</p>
+        <button onClick={() => changeMonth(1)} disabled={monthOffset === 2} className="rounded-full flex items-center justify-center" style={{ width: 32, height: 32, background: monthOffset === 2 ? "transparent" : card, color: monthOffset === 2 ? "#3A3F5C" : white }}>
+          <ChevronRight size={17} />
+        </button>
+      </div>
       <ErrorBanner message={error} />
       <div className="grid grid-cols-7 gap-1.5 mt-4">
         {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
           <div key={i} className="text-center" style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 10, color: gray }}>{d}</div>
         ))}
-        {Array.from({ length: 1 }).map((_, i) => <div key={"pad" + i} />)}
+        {Array.from({ length: firstOffset }).map((_, i) => <div key={"pad" + i} />)}
         {days.map((d) => {
-          const isAvailable = availableDays.includes(d);
+          const isAvailable = !isPast(d) && freeSlots(d).length > 0;
           const isSelected = selectedDay === d;
           return (
-            <button key={d} disabled={!isAvailable} onClick={() => setSelectedDay(d)} className="aspect-square rounded-xl flex items-center justify-center"
+            <button key={d} disabled={!isAvailable} onClick={() => { setSelectedDay(d); setSelectedSlot(null); }} className="aspect-square rounded-xl flex items-center justify-center"
               style={{ background: isSelected ? blue : isAvailable ? blueSoft : "transparent", color: isSelected || isAvailable ? white : "#3A3F5C", fontFamily: "Inter", fontWeight: 600, fontSize: 13 }}>
               {d}
             </button>
@@ -280,7 +351,7 @@ function BookSession({ userId, perfil, onBooked }) {
         <div className="mt-6">
           <span style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>HORARIOS DISPONIBLES</span>
           <div className="grid grid-cols-3 gap-2 mt-2">
-            {SLOTS.map((s) => (
+            {freeSlots(selectedDay).map((s) => (
               <button key={s} onClick={() => setSelectedSlot(s)} className="py-2.5 rounded-xl flex items-center justify-center gap-1.5"
                 style={{ background: selectedSlot === s ? blue : card, color: white, border: `1px solid ${selectedSlot === s ? blue : cardAlt}`, fontFamily: "Inter", fontSize: 13 }}>
                 <Clock size={13} />{s}
