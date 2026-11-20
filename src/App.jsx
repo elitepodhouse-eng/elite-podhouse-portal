@@ -1319,7 +1319,7 @@ function AdminPagos() {
 
   const load = useCallback(async (cid) => {
     if (!cid) { setPagos([]); return; }
-    const res = await safeSelect("pagos", supabase.from("pagos").select("*").eq("cliente_id", cid).order("fecha", { ascending: false }));
+    const res = await safeSelect("pagos", supabase.from("pagos").select("*").eq("cliente_id", cid).order("fecha_vencimiento", { ascending: false }));
     setPagos(res.data);
     setMissing(res.missing);
   }, []);
