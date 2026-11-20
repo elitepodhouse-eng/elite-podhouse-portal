@@ -1,19 +1,28 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
   Mic, Calendar as CalIcon, Clock, FileText, LogOut, Menu, X, Radio,
-  ArrowRight, Users, Loader2, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight
+  ArrowRight, Users, Loader2, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight,
+  Wallet, Package, Sparkles, Newspaper, Banknote, Trash2
 } from "lucide-react";
 import { supabase, ADMIN_EMAIL } from "./supabaseClient";
 
-const navy = "#0A0D1E";
+// Identidad Élite Podhouse (la misma de la vista previa aprobada por Tania)
+const navy = "#0B1338";
 const card = "#12152B";
-const cardAlt = "#171B36";
-const blue = "#3B4CE0";
-const blueLight = "#5D6BFF";
-const blueSoft = "rgba(59,76,224,0.14)";
+const cardAlt = "#1E2447";
+const blue = "#2F52FF";
+const blueDeep = "#1B2FBD";
+const blueLight = "#9FB0FF";
+const blueSoft = "rgba(47,82,255,0.18)";
 const white = "#FFFFFF";
-const gray = "#9098B8";
+const gray = "#8B90B3";
 const red = "#E05D5D";
+const green = "#7ED9A0";
+const greenBg = "rgba(46,160,90,0.18)";
+const amber = "#F5C46A";
+const amberBg = "rgba(245,166,35,0.16)";
+const gradBlue = `linear-gradient(135deg, ${blueDeep}, ${blue})`;
+const FONT = "Poppins";
 
 const PAQUETES = ["Esencia", "Impacto", "Identidad", "Expansión"];
 const SLOTS = ["09:00", "10:30", "12:00", "16:00", "17:30"]; // lun–vie: estudio de 8:00 a 20:00
@@ -22,22 +31,107 @@ const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "
 // La disponibilidad real sale de la tabla `sesiones` de Supabase: un horario
 // ocupado por cualquier cliente ya no se ofrece. Fase futura: Google Calendar.
 
+// Precios reales de los paquetes (sin IVA), de la página de Élite Podhouse.
+const PRECIOS = {
+  Esencia: { sesion: 1499, mensual: 4999 },
+  Impacto: { sesion: 2499, mensual: 7999 },
+  Identidad: { sesion: 3499, mensual: 10999 },
+  "Expansión": { sesion: 3999, mensual: 12999 },
+};
+// Qué incluye cada paquete (contenido real; cada nivel suma lo del anterior).
+const INCLUYE = {
+  Esencia: [
+    "Grabación en set decorado, 3 cámaras 4K y micrófonos profesionales",
+    "Iluminación profesional",
+    "Personal de producción en apoyo constante",
+    "Video directo + audio",
+  ],
+  Impacto: [
+    "Edición, color y audio de cada episodio",
+    "Hasta 7 reels por episodio",
+    "Trailer de 30 segundos",
+  ],
+  Identidad: [
+    "Edición con gráficos personalizados",
+    "4 thumbnails para YouTube",
+    "Títulos con SEO",
+    "Publicación en YouTube y podcast",
+  ],
+  "Expansión": [
+    "Producción y edición Premium 360°",
+    "Estrategia de distribución y calendario editorial",
+    "Preferencia en agenda",
+  ],
+};
+function incluyePaquete(paquete) {
+  const order = ["Esencia", "Impacto", "Identidad", "Expansión"];
+  const idx = order.indexOf(paquete);
+  if (idx < 0) return [];
+  return order.slice(0, idx + 1).flatMap((p) => INCLUYE[p]);
+}
+const SETS = {
+  OCRE: "Terciopelo mostaza, luz cálida, el más vibrante.",
+  "ÍNDIGO": "Mesa de madera, 4 micrófonos, paredes y luz azules, con TV.",
+  INDIGO: "Mesa de madera, 4 micrófonos, paredes y luz azules, con TV.",
+  NOGAL: "Terciopelo azul marino, luz violeta, piso de madera gris, sin TV, el más íntimo.",
+  "ÓNIX": "Cortinas negras, luz roja, el más dramático.",
+  ONIX: "Cortinas negras, luz roja, el más dramático.",
+};
+
+// Etapas del flujo de entrega de un episodio (vista previa aprobada).
+const ETAPAS = [
+  { id: "grabado", label: "Grabado" },
+  { id: "en_edicion", label: "En edición" },
+  { id: "en_revision", label: "En revisión" },
+  { id: "publicado", label: "Publicado" },
+];
+const ETAPA_PRIORIDAD = { en_revision: 3, en_edicion: 2, grabado: 1, publicado: 0 };
+const ETAPA_LABEL = Object.fromEntries(ETAPAS.map((e) => [e.id, e.label]));
+
+const fmtMoney = (n) => `$${Number(n || 0).toLocaleString("es-MX", { maximumFractionDigits: 0 })}`;
+const fmtFecha = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} de ${MESES[m - 1]} de ${y}`;
+};
+
+// Consulta que tolera que la tabla aún no exista (PGRST205): devuelve
+// { data, missing } en vez de romper la vista. Las tablas episodios, pagos y
+// contenidos se crean con supabase/migrations/001_portal_inicio.sql.
+async function safeSelect(table, query) {
+  try {
+    const res = await query;
+    if (res.error) {
+      if (res.error.code === "PGRST205" || res.status === 404) return { data: [], missing: true };
+      throw res.error;
+    }
+    return { data: res.data || [], missing: false };
+  } catch {
+    return { data: [], missing: true };
+  }
+}
+
 // ---------- UI atoms ----------
 function Eyebrow({ children }) {
   return (
     <div className="flex items-center gap-2 mb-3">
       <span style={{ width: 6, height: 6, background: blue, borderRadius: 2 }} />
-      <span style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 11, color: blueLight, letterSpacing: 1.5 }}>{children}</span>
+      <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: blueLight, letterSpacing: 1.5 }}>{children}</span>
       <span style={{ width: 6, height: 6, background: blue, borderRadius: 2 }} />
     </div>
   );
 }
 
-function PillButton({ children, onClick, disabled, full, type = "button" }) {
+function PillButton({ children, onClick, disabled, full, type = "button", ghost }) {
   return (
     <button type={type} disabled={disabled} onClick={onClick}
       className={`flex items-center justify-center gap-2 rounded-full px-5 py-2.5 ${full ? "w-full" : ""}`}
-      style={{ background: disabled ? "#2A2E4A" : blue, color: white, fontFamily: "Inter", fontWeight: 600, fontSize: 14, opacity: disabled ? 0.7 : 1 }}>
+      style={{
+        background: ghost ? "transparent" : disabled ? "#2A2E4A" : blue,
+        border: ghost ? `1px solid ${blue}` : "none",
+        color: ghost ? blueLight : white,
+        fontFamily: FONT, fontWeight: 600, fontSize: 14, opacity: disabled ? 0.7 : 1,
+      }}>
       {children}
     </button>
   );
@@ -46,15 +140,15 @@ function PillButton({ children, onClick, disabled, full, type = "button" }) {
 function Input({ label, ...props }) {
   return (
     <div className="mb-4">
-      <label style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>{label}</label>
-      <input {...props} className="w-full rounded-xl px-4 py-3 outline-none" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: "Inter", fontSize: 14 }} />
+      <label style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>{label}</label>
+      <input {...props} className="w-full rounded-xl px-4 py-3 outline-none" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
     </div>
   );
 }
 
 function Logo({ size = 28 }) {
   return (
-    <div className="flex items-center justify-center shrink-0" style={{ width: size, height: size, background: blue, borderRadius: 8 }}>
+    <div className="flex items-center justify-center shrink-0" style={{ width: size, height: size, background: gradBlue, borderRadius: 8 }}>
       <Mic size={size * 0.55} color={white} strokeWidth={2.4} />
     </div>
   );
@@ -65,7 +159,50 @@ function ErrorBanner({ message }) {
   return (
     <div className="flex items-start gap-2 rounded-xl px-3 py-2.5 mb-4" style={{ background: "rgba(224,93,93,0.12)", border: `1px solid ${red}55` }}>
       <AlertCircle size={15} color={red} className="mt-0.5 shrink-0" />
-      <span style={{ fontFamily: "Inter", fontSize: 12.5, color: "#F3A9A9" }}>{message}</span>
+      <span style={{ fontFamily: FONT, fontSize: 12.5, color: "#F3A9A9" }}>{message}</span>
+    </div>
+  );
+}
+
+function Stepper({ etapa }) {
+  const idx = ETAPAS.findIndex((e) => e.id === etapa);
+  return (
+    <div className="flex mt-4">
+      {ETAPAS.map((e, i) => {
+        const done = i < idx;
+        const now = i === idx;
+        return (
+          <div key={e.id} className="flex-1 text-center relative pt-5" style={{ fontFamily: FONT, fontSize: 11, color: done ? white : now ? white : gray, fontWeight: now ? 700 : 400 }}>
+            <span className="absolute left-1/2 top-1" style={{ transform: "translateX(-50%)", width: 11, height: 11, borderRadius: "50%", background: done ? blue : now ? "#F5A623" : cardAlt, border: `2px solid ${done ? blue : now ? "#F5A623" : cardAlt}`, boxShadow: now ? "0 0 0 4px rgba(245,166,35,0.25)" : "none" }} />
+            {i > 0 && <span className="absolute top-2" style={{ left: "calc(-50% + 8px)", right: "calc(50% + 8px)", height: 2, background: done ? blue : cardAlt }} />}
+            {e.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function EtapaPill({ etapa }) {
+  const style =
+    etapa === "publicado" ? { background: greenBg, color: green } :
+    etapa === "en_revision" ? { background: amberBg, color: amber } :
+    etapa === "en_edicion" ? { background: blueSoft, color: blueLight } :
+    { background: cardAlt, color: gray };
+  return (
+    <span className="px-2.5 py-1 rounded-full shrink-0" style={{ ...style, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>
+      {ETAPA_LABEL[etapa] || etapa}
+    </span>
+  );
+}
+
+function Card({ children, blue: isBlue, onClick }) {
+  return (
+    <div className="rounded-2xl p-5" onClick={onClick}
+      style={isBlue
+        ? { background: gradBlue, cursor: onClick ? "pointer" : "default" }
+        : { background: card, border: `1px solid ${cardAlt}`, cursor: onClick ? "pointer" : "default" }}>
+      {children}
     </div>
   );
 }
@@ -120,17 +257,17 @@ function AuthScreen() {
       <div className="w-full" style={{ maxWidth: 360 }}>
         <div className="flex flex-col items-center mb-8">
           <Logo size={44} />
-          <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 22, color: white, marginTop: 14 }}>Élite Podhouse</h1>
-          <p style={{ fontFamily: "Inter", fontSize: 13, color: gray, marginTop: 2 }}>Portal de clientes</p>
+          <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white, marginTop: 14 }}>Élite Podhouse</h1>
+          <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 2 }}>Portal de clientes</p>
         </div>
 
         {signupDone ? (
           <div className="text-center">
             <CheckCircle2 size={28} color={blueLight} className="mx-auto mb-3" />
-            <p style={{ fontFamily: "Inter", fontSize: 14, color: white }}>
+            <p style={{ fontFamily: FONT, fontSize: 14, color: white }}>
               Cuenta creada. Revisa tu correo para confirmarla antes de iniciar sesión.
             </p>
-            <button onClick={() => { setSignupDone(false); setMode("login"); }} style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
+            <button onClick={() => { setSignupDone(false); setMode("login"); }} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
               Ir a iniciar sesión
             </button>
           </div>
@@ -142,21 +279,21 @@ function AuthScreen() {
             <PillButton full type="submit" disabled={loading}>
               {loading ? <Loader2 size={15} className="animate-spin" /> : mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
             </PillButton>
-            <p className="text-center mt-5" style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>
+            <p className="text-center mt-5" style={{ fontFamily: FONT, fontSize: 13, color: gray }}>
               {mode === "login" ? "¿Eres nuevo cliente?" : "¿Ya tienes cuenta?"}{" "}
               <button type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }} style={{ color: blueLight, fontWeight: 600 }}>
                 {mode === "login" ? "Regístrate" : "Inicia sesión"}
               </button>
             </p>
             {mode === "login" && (
-              <p className="text-center mt-3" style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>
+              <p className="text-center mt-3" style={{ fontFamily: FONT, fontSize: 13, color: gray }}>
                 <button type="button" onClick={forgot} disabled={loading} style={{ color: blueLight, fontWeight: 600 }}>
                   ¿Olvidaste tu contraseña?
                 </button>
               </p>
             )}
             {resetSent && (
-              <p className="text-center mt-4" style={{ fontFamily: "Inter", fontSize: 13, color: white }}>
+              <p className="text-center mt-4" style={{ fontFamily: FONT, fontSize: 13, color: white }}>
                 Te enviamos un correo con el enlace para crear una contraseña nueva. Revisa tu bandeja de entrada.
               </p>
             )}
@@ -202,16 +339,16 @@ function ResetPasswordScreen({ onDone }) {
       <div className="w-full" style={{ maxWidth: 360 }}>
         <div className="flex flex-col items-center mb-8">
           <Logo size={44} />
-          <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 22, color: white, marginTop: 14 }}>Élite Podhouse</h1>
-          <p style={{ fontFamily: "Inter", fontSize: 13, color: gray, marginTop: 2 }}>Crea una contraseña nueva</p>
+          <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white, marginTop: 14 }}>Élite Podhouse</h1>
+          <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 2 }}>Crea una contraseña nueva</p>
         </div>
         {done ? (
           <div className="text-center">
             <CheckCircle2 size={28} color={blueLight} className="mx-auto mb-3" />
-            <p style={{ fontFamily: "Inter", fontSize: 14, color: white }}>
+            <p style={{ fontFamily: FONT, fontSize: 14, color: white }}>
               Contraseña actualizada. Ya puedes entrar con la nueva.
             </p>
-            <button onClick={goLogin} style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
+            <button onClick={goLogin} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
               Ir a iniciar sesión
             </button>
           </div>
@@ -235,7 +372,7 @@ function Tab({ active, onClick, icon: Icon, label }) {
   return (
     <button onClick={onClick} className="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-left" style={{ background: active ? blueSoft : "transparent", color: active ? white : gray }}>
       <Icon size={17} strokeWidth={2} color={active ? blueLight : gray} />
-      <span style={{ fontFamily: "Inter", fontSize: 14, fontWeight: 600 }}>{label}</span>
+      <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 600 }}>{label}</span>
     </button>
   );
 }
@@ -245,23 +382,23 @@ function Shell({ nav, view, setView, children }) {
   const logout = () => supabase.auth.signOut();
   return (
     <div style={{ minHeight: "100vh", background: navy, display: "flex" }}>
-      <aside className="hidden md:flex flex-col w-56 p-4 shrink-0" style={{ borderRight: `1px solid ${cardAlt}` }}>
+      <aside className="hidden md:flex flex-col w-60 p-4 shrink-0" style={{ borderRight: `1px solid ${cardAlt}` }}>
         <div className="flex items-center gap-2.5 px-2 mb-8 mt-2">
           <Logo />
-          <span style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 15, color: white }}>Élite Podhouse</span>
+          <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: white }}>Élite Podhouse</span>
         </div>
         <div className="flex flex-col gap-1">
           {nav.map((n) => <Tab key={n.id} active={view === n.id} onClick={() => setView(n.id)} icon={n.icon} label={n.label} />)}
         </div>
         <button onClick={logout} className="mt-auto flex items-center gap-2 px-4 py-3" style={{ color: gray }}>
-          <LogOut size={15} /><span style={{ fontFamily: "Inter", fontSize: 13, fontWeight: 500 }}>Cerrar sesión</span>
+          <LogOut size={15} /><span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500 }}>Cerrar sesión</span>
         </button>
       </aside>
 
       <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3" style={{ background: navy, borderBottom: `1px solid ${cardAlt}` }}>
         <div className="flex items-center gap-2.5">
           <Logo size={24} />
-          <span style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 14, color: white }}>Élite Podhouse</span>
+          <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>Élite Podhouse</span>
         </div>
         <button onClick={() => setMenuOpen(!menuOpen)}>{menuOpen ? <X size={20} color={white} /> : <Menu size={20} color={white} />}</button>
       </div>
@@ -272,38 +409,363 @@ function Shell({ nav, view, setView, children }) {
         </div>
       )}
 
-      <main className="flex-1 px-5 py-8 md:py-10 md:px-10 mt-12 md:mt-0" style={{ maxWidth: 680 }}>{children}</main>
+      <main className="flex-1 px-5 py-8 md:py-10 md:px-10 mt-12 md:mt-0" style={{ maxWidth: 720 }}>{children}</main>
     </div>
   );
 }
 
 // ---------- Client views ----------
-function ClientDashboard({ perfil, goTo }) {
+function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const sesionesMes = sesiones.filter((s) => s.fecha && s.fecha.startsWith(monthPrefix));
+  const proximas = sesiones
+    .filter((s) => s.fecha && s.fecha >= todayISO)
+    .sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+  const proxima = proximas[0];
+  const enCurso = [...episodios]
+    .filter((e) => e.estado !== "publicado")
+    .sort((a, b) => (ETAPA_PRIORIDAD[b.estado] - ETAPA_PRIORIDAD[a.estado]) || (b.numero - a.numero))[0];
+  const pagado = pagos.filter((p) => p.estado === "pagado").reduce((acc, p) => acc + Number(p.monto || 0), 0);
+  const pendiente = pagos.filter((p) => p.estado === "pendiente").reduce((acc, p) => acc + Number(p.monto || 0), 0);
+  const precio = perfil?.paquete ? PRECIOS[perfil.paquete] : null;
+  const incluidos = perfil?.sesiones_incluidas || null;
+  const ultimoSet = [...episodios].sort((a, b) => String(b.fecha_grabacion || "").localeCompare(String(a.fecha_grabacion || "")))[0]?.set;
+
   return (
     <div>
       <Eyebrow>PANEL DE {(perfil?.nombre || perfil?.correo || "").split(" ")[0].toUpperCase()}</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 28, color: white }}>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 28, color: white }}>
         Hola{perfil?.nombre ? `, ${perfil.nombre.split(" ")[0]}` : ""} 👋
       </h1>
       {perfil?.activo ? (
-        <p style={{ fontFamily: "Inter", fontSize: 14, color: gray, marginTop: 6 }}>
-          {perfil.show_nombre || "Tu proyecto"} · Paquete <span style={{ color: blueLight, fontWeight: 600 }}>{perfil.paquete}</span>
+        <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 6 }}>
+          {perfil.show_nombre || "Tu proyecto"}{perfil.paquete ? <> · Paquete <span style={{ color: blueLight, fontWeight: 600 }}>{perfil.paquete}</span></> : ""}
+          {perfil.estado_proyecto ? <> · {perfil.estado_proyecto}</> : ""}
         </p>
       ) : (
-        <p style={{ fontFamily: "Inter", fontSize: 14, color: gray, marginTop: 6 }}>Tu cuenta está registrada. Élite Podhouse activará tu paquete pronto.</p>
+        <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 6 }}>Tu cuenta está registrada. Élite Podhouse activará tu paquete pronto.</p>
       )}
+
       <div className="mt-7 space-y-4">
-        <div className="rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-          <span style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>ESTADO DEL PROYECTO</span>
-          <p style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 19, color: white, marginTop: 10 }}>{perfil?.estado_proyecto || "Sin asignar"}</p>
-        </div>
-        <div className="rounded-2xl p-5 cursor-pointer" style={{ background: `linear-gradient(135deg, ${blue}, ${blueLight})` }} onClick={() => goTo("book")}>
-          <span style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.85)", letterSpacing: 1 }}>AGENDAR</span>
-          <p style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 19, color: white, marginTop: 10 }}>Nueva sesión de grabación</p>
-          <div className="flex items-center gap-1.5 mt-3" style={{ color: white }}>
-            <span style={{ fontFamily: "Inter", fontSize: 13, fontWeight: 600 }}>Elegir fecha y hora</span><ArrowRight size={14} />
+        {/* Tu paquete */}
+        <Card blue>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)", letterSpacing: 1 }}>TU PAQUETE</span>
+          <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white, marginTop: 8 }}>
+            {perfil?.paquete || "Sin paquete asignado"}{perfil?.modalidad === "mensual" ? " · Mensual" : perfil?.modalidad === "sesion" ? " · Por sesión" : ""}
+          </p>
+          {precio && (
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+              Mensual {fmtMoney(precio.mensual)} · Por sesión {fmtMoney(precio.sesion)} · sin IVA
+            </p>
+          )}
+          <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+            {sesionesMes.length} {sesionesMes.length === 1 ? "sesión" : "sesiones"} este mes
+            {incluidos ? ` · te quedan ${Math.max(0, incluidos - sesionesMes.length)} de ${incluidos}` : ""}
+            {ultimoSet ? ` · Set ${ultimoSet.charAt(0) + ultimoSet.slice(1).toLowerCase()}` : ""}
+          </p>
+          {incluidos && (
+            <div style={{ height: 9, borderRadius: 99, background: "rgba(255,255,255,0.25)", marginTop: 14, overflow: "hidden" }}>
+              <i style={{ display: "block", height: "100%", borderRadius: 99, background: "#fff", width: `${Math.min(100, (sesionesMes.length / incluidos) * 100)}%` }} />
+            </div>
+          )}
+        </Card>
+
+        {/* Entrega en curso */}
+        {enCurso ? (
+          <Card>
+            <div className="flex items-center justify-between">
+              <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>TU ENTREGA EN CURSO</span>
+              <EtapaPill etapa={enCurso.estado} />
+            </div>
+            <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 19, color: white, marginTop: 10 }}>
+              Episodio {enCurso.numero} — {enCurso.titulo}
+            </p>
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 4, lineHeight: 1.55 }}>
+              {enCurso.estado === "en_revision"
+                ? "Ya está editado y listo para que lo revises. Si lo apruebas, lo publicamos."
+                : enCurso.estado === "en_edicion"
+                  ? "El equipo está editando tu episodio."
+                  : "Tu episodio está grabado y en cola de edición."}
+            </p>
+            <Stepper etapa={enCurso.estado} />
+            <div className="mt-5">
+              <PillButton onClick={() => goTo("entregas")}>Revisar episodio <ArrowRight size={15} /></PillButton>
+            </div>
+          </Card>
+        ) : (
+          <Card>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>TUS ENTREGAS</span>
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 10, lineHeight: 1.55 }}>
+              Aún no hay episodios registrados. El equipo los va agregando aquí conforme se graban, para que veas en qué va cada uno.
+            </p>
+            <div className="mt-4">
+              <PillButton ghost onClick={() => goTo("entregas")}>Ver mis entregas</PillButton>
+            </div>
+          </Card>
+        )}
+
+        {/* Saldo */}
+        <Card>
+          <div className="flex items-center justify-between">
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>SALDO PENDIENTE</span>
+            <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>{fmtMoney(pendiente)}</span>
           </div>
-        </div>
+          <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6 }}>
+            {pagos.length === 0
+              ? "Aún no hay pagos registrados para tu paquete."
+              : `Pagado ${fmtMoney(pagado)}${pendiente > 0 ? " · el resto se paga por adelantado antes de grabar." : " · al corriente."}`}
+          </p>
+          <div className="mt-4">
+            <PillButton ghost onClick={() => goTo("pagos")}>Ver pagos</PillButton>
+          </div>
+        </Card>
+
+        {/* Próxima sesión */}
+        <Card>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>PRÓXIMA SESIÓN</span>
+          {proxima ? (
+            <>
+              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 19, color: white, marginTop: 10 }}>
+                {fmtFecha(proxima.fecha)} · {proxima.hora}
+              </p>
+              <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 4 }}>
+                {proxima.titulo || "Sesión de grabación"} · Llega 10 minutos antes.
+              </p>
+            </>
+          ) : (
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 10 }}>
+              No tienes sesiones agendadas. Aparta la siguiente cuando quieras.
+            </p>
+          )}
+          <div className="mt-4">
+            <PillButton onClick={() => goTo("book")}>Reservar otra sesión <ArrowRight size={15} /></PillButton>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function PackageView({ perfil, sesiones, episodios }) {
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const sesionesMes = sesiones.filter((s) => s.fecha && s.fecha.startsWith(monthPrefix));
+  const precio = perfil?.paquete ? PRECIOS[perfil.paquete] : null;
+  const incluidos = perfil?.sesiones_incluidas || null;
+  const incluye = incluyePaquete(perfil?.paquete);
+  // El set no es un campo del cliente en la base: se toma del set del último
+  // episodio grabado (dato real de la tabla episodios).
+  const ultimoEp = [...(episodios || [])].sort((a, b) => String(b.fecha_grabacion || "").localeCompare(String(a.fecha_grabacion || "")))[0];
+  const setNombre = ultimoEp?.set ? ultimoEp.set.charAt(0) + ultimoEp.set.slice(1).toLowerCase() : null;
+  const setDesc = ultimoEp?.set ? SETS[ultimoEp.set] || SETS[ultimoEp.set.toUpperCase()] : null;
+
+  return (
+    <div>
+      <Eyebrow>MI PAQUETE</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Mi paquete</h1>
+      <div className="mt-6 space-y-4">
+        <Card blue>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)", letterSpacing: 1 }}>CONTRATADO</span>
+          <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white, marginTop: 8 }}>
+            {perfil?.paquete ? `${perfil.paquete}${perfil?.modalidad === "mensual" ? " — Mensual (4 episodios)" : perfil?.modalidad === "sesion" ? " — Por sesión" : ""}` : "Sin paquete asignado"}
+          </p>
+          {precio && (
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+              {fmtMoney(precio.mensual)} al mes · {fmtMoney(precio.sesion)} por sesión · sin IVA
+            </p>
+          )}
+          {incluidos && (
+            <div style={{ height: 9, borderRadius: 99, background: "rgba(255,255,255,0.25)", marginTop: 14, overflow: "hidden" }}>
+              <i style={{ display: "block", height: "100%", borderRadius: 99, background: "#fff", width: `${Math.min(100, (sesionesMes.length / incluidos) * 100)}%` }} />
+            </div>
+          )}
+          <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 10 }}>
+            {sesionesMes.length} {sesionesMes.length === 1 ? "sesión" : "sesiones"} este mes
+            {incluidos ? ` · ${Math.max(0, incluidos - sesionesMes.length)} te quedan` : ""}
+          </p>
+        </Card>
+
+        <Card>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>QUÉ INCLUYE</span>
+          {incluye.length > 0 ? (
+            <ul className="mt-3 space-y-2.5">
+              {incluye.map((item) => (
+                <li key={item} className="flex gap-2.5" style={{ fontFamily: FONT, fontSize: 13.5, color: white, lineHeight: 1.5 }}>
+                  <span style={{ color: blueLight, marginTop: 1 }}>✓</span>{item}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 10 }}>El estudio te confirma qué incluye tu paquete.</p>
+          )}
+        </Card>
+
+        <Card>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>TU SET</span>
+          {setNombre ? (
+            <>
+              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 19, color: white, marginTop: 10 }}>{setNombre}</p>
+              {setDesc && <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 4 }}>{setDesc}</p>}
+              <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 6 }}>Set de tu último episodio grabado.</p>
+            </>
+          ) : (
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 10 }}>
+              Aún no tienes episodios grabados. El set se registra con cada episodio.
+            </p>
+          )}
+        </Card>
+        <p style={{ fontFamily: FONT, fontSize: 12.5, color: gray, lineHeight: 1.55 }}>
+          Los precios de los paquetes son los reales de Élite Podhouse. Pago por adelantado; reprogramación con 48 h de anticipación.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function DeliveriesView({ episodios, loading, missing, onChanged }) {
+  const [busyId, setBusyId] = useState(null);
+  const [msg, setMsg] = useState("");
+
+  const updateEtapa = async (ep, estado) => {
+    setBusyId(ep.id);
+    setMsg("");
+    const { error } = await supabase.from("episodios").update({ estado }).eq("id", ep.id);
+    if (error) setMsg("No se pudo guardar. Inténtalo de nuevo.");
+    else {
+      setMsg(estado === "publicado" ? "✓ Episodio aprobado. El equipo lo publica." : "✓ Gracias, el equipo toma tus cambios.");
+      onChanged && onChanged();
+    }
+    setBusyId(null);
+  };
+
+  return (
+    <div>
+      <Eyebrow>MIS ENTREGAS</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Mis entregas</h1>
+      <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6, marginBottom: 20 }}>
+        Aquí ves en qué va cada episodio, desde que se graba hasta que se publica.
+      </p>
+      {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
+      {!loading && missing && (
+        <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>
+          El seguimiento de entregas aún no está activado en el portal. El equipo lo está preparando.
+        </p>
+      )}
+      {!loading && !missing && episodios.length === 0 && (
+        <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Aún no hay episodios registrados para tu proyecto.</p>
+      )}
+      {msg && <p style={{ fontFamily: FONT, fontSize: 13, color: green, marginBottom: 12 }}>{msg}</p>}
+      <div className="space-y-3">
+        {episodios.map((ep) => (
+          <Card key={ep.id}>
+            <div className="flex items-center justify-between">
+              <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 17, color: white }}>Episodio {ep.numero}</span>
+              <EtapaPill etapa={ep.estado} />
+            </div>
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 4 }}>{ep.titulo}</p>
+            <Stepper etapa={ep.estado} />
+            <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 12 }}>
+              {ep.estado === "publicado"
+                ? ep.fecha_entrega ? `Publicado · entrega ${fmtFecha(ep.fecha_entrega)}.` : "Publicado."
+                : ep.estado === "en_revision"
+                  ? "Te toca a ti: revísalo y apruébalo o pide cambios."
+                  : ep.estado === "en_edicion"
+                    ? `El equipo está editando tu episodio${ep.fecha_entrega ? ` · entrega ${fmtFecha(ep.fecha_entrega)}` : ""}.`
+                    : `Grabado${ep.fecha_grabacion ? ` el ${fmtFecha(ep.fecha_grabacion)}` : ""}, en cola de edición.`}
+              {ep.set ? ` · Set ${ep.set.charAt(0) + ep.set.slice(1).toLowerCase()}` : ""}
+            </p>
+            {ep.estado === "en_revision" && (
+              <div className="flex gap-2 mt-4">
+                <PillButton disabled={busyId === ep.id} onClick={() => updateEtapa(ep, "publicado")}>
+                  {busyId === ep.id ? <Loader2 size={15} className="animate-spin" /> : "Aprobar episodio"}
+                </PillButton>
+                <PillButton ghost disabled={busyId === ep.id} onClick={() => updateEtapa(ep, "en_edicion")}>
+                  Pedir cambios
+                </PillButton>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PaymentsView({ pagos, perfil, loading, missing }) {
+  const pagado = pagos.filter((p) => p.estado === "pagado").reduce((acc, p) => acc + Number(p.monto || 0), 0);
+  const pendiente = pagos.filter((p) => p.estado === "pendiente").reduce((acc, p) => acc + Number(p.monto || 0), 0);
+  const total = pagado + pendiente;
+  const precio = perfil?.paquete ? PRECIOS[perfil.paquete] : null;
+
+  return (
+    <div>
+      <Eyebrow>PAGOS</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Pagos</h1>
+      <div className="mt-6 space-y-4">
+        <Card blue>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)", letterSpacing: 1 }}>SALDO PENDIENTE</span>
+          <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 32, color: white, marginTop: 8 }}>{fmtMoney(pendiente)}</p>
+          <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 4 }}>
+            {perfil?.paquete && precio
+              ? `Del paquete ${perfil.paquete}: mensual ${fmtMoney(precio.mensual)} · por sesión ${fmtMoney(precio.sesion)} · sin IVA.`
+              : "Tu paquete aún no tiene pagos registrados."}
+          </p>
+        </Card>
+        <Card>
+          <div className="flex justify-between" style={{ fontFamily: FONT, fontSize: 13.5, color: gray }}><span>Pagado</span><b style={{ color: white }}>{fmtMoney(pagado)}</b></div>
+          <div className="flex justify-between mt-2" style={{ fontFamily: FONT, fontSize: 13.5, color: gray }}><span>Pendiente</span><b style={{ color: white }}>{fmtMoney(pendiente)}</b></div>
+          <div className="flex justify-between mt-2" style={{ fontFamily: FONT, fontSize: 13.5, color: gray }}><span>Total registrado</span><b style={{ color: white }}>{fmtMoney(total)}</b></div>
+        </Card>
+        <Card>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>HISTORIAL</span>
+          {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 10 }}>Cargando…</p>}
+          {!loading && missing && <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 10 }}>El registro de pagos aún no está activado en el portal.</p>}
+          {!loading && !missing && pagos.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 10 }}>Aún no hay pagos registrados.</p>}
+          {pagos.map((p) => (
+            <div key={p.id} className="flex items-center justify-between mt-3" style={{ fontFamily: FONT, fontSize: 13.5 }}>
+              <span style={{ color: gray }}>{p.concepto} · {p.estado === "pagado" ? (p.fecha_pago ? `pagado el ${fmtFecha(p.fecha_pago)}` : "pagado") : `vence el ${fmtFecha(p.fecha_vencimiento)}`}</span>
+              <b style={{ color: p.estado === "pagado" ? green : white }}>{fmtMoney(p.monto)}{p.estado === "pagado" ? " ✓" : ""}</b>
+            </div>
+          ))}
+        </Card>
+        <p style={{ fontFamily: FONT, fontSize: 12.5, color: gray, lineHeight: 1.55 }}>
+          Los pagos los registra el estudio en el portal; aquí solo los ves. El pago es por adelantado, por tarjeta, transferencia o efectivo.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function TipsView({ contenidos, loading, missing }) {
+  const tips = contenidos.filter((c) => c.tipo === "tip");
+  const noticias = contenidos.filter((c) => c.tipo === "noticia");
+  return (
+    <div>
+      <Eyebrow>TIPS Y NOTICIAS</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Tips y noticias</h1>
+      <div className="mt-6 space-y-4">
+        {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
+        {!loading && missing && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Los tips y noticias aún no están activados en el portal.</p>}
+        {!loading && !missing && contenidos.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Próximamente: tips y noticias del estudio.</p>}
+        {tips.map((t, i) => (
+          <Card key={t.id}>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>TIP DE ESTA SEMANA</span>
+            <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 18, color: white, marginTop: 8 }}>
+              <span style={{ display: "inline-flex", width: 30, height: 30, borderRadius: 10, background: blueSoft, color: blueLight, alignItems: "center", justifyContent: "center", fontSize: 14, marginRight: 10 }}>{i + 1}</span>
+              {t.titulo}
+            </p>
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6, lineHeight: 1.55 }}>{t.cuerpo}</p>
+          </Card>
+        ))}
+        {noticias.map((n) => (
+          <Card key={n.id} blue>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)", letterSpacing: 1 }}>NOTICIA DEL ESTUDIO</span>
+            <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 18, color: white, marginTop: 8 }}>{n.titulo}</p>
+            <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 6, lineHeight: 1.55 }}>{n.cuerpo}</p>
+          </Card>
+        ))}
       </div>
     </div>
   );
@@ -437,10 +899,10 @@ function BookSession({ userId, perfil, onBooked }) {
         <div className="rounded-full flex items-center justify-center" style={{ width: 56, height: 56, background: blueSoft }}>
           <CheckCircle2 size={28} color={blueLight} />
         </div>
-        <h2 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 23, color: white, marginTop: 18 }}>Sesión confirmada</h2>
-        <p style={{ fontFamily: "Inter", fontSize: 14, color: gray, marginTop: 6 }}>{fechaLabel(selectedDay)}, {selectedSlot} hrs</p>
+        <h2 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 23, color: white, marginTop: 18 }}>Sesión confirmada</h2>
+        <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 6 }}>{fechaLabel(selectedDay)}, {selectedSlot} hrs</p>
         {calendarWarning && (
-          <p style={{ fontFamily: "Inter", fontSize: 13, color: "#F3A9A9", marginTop: 12 }}>
+          <p style={{ fontFamily: FONT, fontSize: 13, color: "#F3A9A9", marginTop: 12 }}>
             Sesión guardada, pero no se pudo agregar al calendario de Google. Avisa al estudio para que la anoten.
           </p>
         )}
@@ -451,12 +913,12 @@ function BookSession({ userId, perfil, onBooked }) {
   return (
     <div>
       <Eyebrow>AGENDAR SESIÓN</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Elige fecha y hora</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Elige fecha y hora</h1>
       <div className="flex items-center justify-between mt-4">
         <button onClick={() => changeMonth(-1)} disabled={monthOffset === 0} className="rounded-full flex items-center justify-center" style={{ width: 32, height: 32, background: monthOffset === 0 ? "transparent" : card, color: monthOffset === 0 ? "#3A3F5C" : white }}>
           <ChevronLeft size={17} />
         </button>
-        <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>{monthLabel}</p>
+        <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>{monthLabel}</p>
         <button onClick={() => changeMonth(1)} disabled={monthOffset === 2} className="rounded-full flex items-center justify-center" style={{ width: 32, height: 32, background: monthOffset === 2 ? "transparent" : card, color: monthOffset === 2 ? "#3A3F5C" : white }}>
           <ChevronRight size={17} />
         </button>
@@ -464,7 +926,7 @@ function BookSession({ userId, perfil, onBooked }) {
       <ErrorBanner message={error} />
       <div className="grid grid-cols-7 gap-1.5 mt-4">
         {["L", "M", "M", "J", "V", "S", "D"].map((d, i) => (
-          <div key={i} className="text-center" style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 10, color: gray }}>{d}</div>
+          <div key={i} className="text-center" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 10, color: gray }}>{d}</div>
         ))}
         {Array.from({ length: firstOffset }).map((_, i) => <div key={"pad" + i} />)}
         {days.map((d) => {
@@ -472,7 +934,7 @@ function BookSession({ userId, perfil, onBooked }) {
           const isSelected = selectedDay === d;
           return (
             <button key={d} disabled={!isAvailable} onClick={() => { setSelectedDay(d); setSelectedSlot(null); }} className="aspect-square rounded-xl flex items-center justify-center"
-              style={{ background: isSelected ? blue : isAvailable ? blueSoft : "transparent", color: isSelected || isAvailable ? white : "#3A3F5C", fontFamily: "Inter", fontWeight: 600, fontSize: 13 }}>
+              style={{ background: isSelected ? blue : isAvailable ? blueSoft : "transparent", color: isSelected || isAvailable ? white : "#3A3F5C", fontFamily: FONT, fontWeight: 600, fontSize: 13 }}>
               {d}
             </button>
           );
@@ -480,11 +942,11 @@ function BookSession({ userId, perfil, onBooked }) {
       </div>
       {selectedDay && (
         <div className="mt-6">
-          <span style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>HORARIOS DISPONIBLES</span>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>HORARIOS DISPONIBLES</span>
           <div className="grid grid-cols-3 gap-2 mt-2">
             {freeSlots(selectedDay).map((s) => (
               <button key={s} onClick={() => setSelectedSlot(s)} className="py-2.5 rounded-xl flex items-center justify-center gap-1.5"
-                style={{ background: selectedSlot === s ? blue : card, color: white, border: `1px solid ${selectedSlot === s ? blue : cardAlt}`, fontFamily: "Inter", fontSize: 13 }}>
+                style={{ background: selectedSlot === s ? blue : card, color: white, border: `1px solid ${selectedSlot === s ? blue : cardAlt}`, fontFamily: FONT, fontSize: 13 }}>
                 <Clock size={13} />{s}
               </button>
             ))}
@@ -506,10 +968,10 @@ function NoteBlock({ title, items }) {
   if (!items.length) return null;
   return (
     <div className="mb-5 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-      <span style={{ fontFamily: "Inter", fontWeight: 700, fontSize: 11, color: blueLight, letterSpacing: 1 }}>{title}</span>
+      <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: blueLight, letterSpacing: 1 }}>{title}</span>
       <ul className="mt-3 space-y-2.5">
         {items.map((it) => (
-          <li key={it.id} className="flex gap-2.5" style={{ fontFamily: "Inter", fontSize: 13.5, color: white }}>
+          <li key={it.id} className="flex gap-2.5" style={{ fontFamily: FONT, fontSize: 13.5, color: white }}>
             <span style={{ color: blueLight, marginTop: 1 }}>●</span><span style={{ lineHeight: 1.5 }}>{it.contenido}</span>
           </li>
         ))}
@@ -523,10 +985,10 @@ function MySet({ notas, loading }) {
   return (
     <div>
       <Eyebrow>DETALLES DEL SET</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Notas de grabación</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Notas de grabación</h1>
       <div className="mt-6">
-        {loading && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Cargando…</p>}
-        {!loading && notas.length === 0 && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Aún no hay notas para tu proyecto.</p>}
+        {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
+        {!loading && notas.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Aún no hay notas para tu proyecto.</p>}
         <NoteBlock title="TÉCNICAS" items={byTipo("tecnica")} />
         <NoteBlock title="CREATIVAS" items={byTipo("creativa")} />
         <NoteBlock title="REQUISITOS" items={byTipo("requisito")} />
@@ -539,17 +1001,17 @@ function History({ sesiones, loading }) {
   return (
     <div>
       <Eyebrow>HISTORIAL</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Tus sesiones</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Tus sesiones</h1>
       <div className="mt-6 space-y-3">
-        {loading && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Cargando…</p>}
-        {!loading && sesiones.length === 0 && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Aún no tienes sesiones agendadas.</p>}
+        {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
+        {!loading && sesiones.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Aún no tienes sesiones agendadas.</p>}
         {sesiones.map((s) => (
           <div key={s.id} className="flex items-center justify-between p-4 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
             <div>
-              <p style={{ fontFamily: "Inter", fontSize: 14, color: white, fontWeight: 600 }}>{s.titulo || "Sesión de grabación"}</p>
-              <p style={{ fontFamily: "Inter", fontSize: 11.5, color: gray, marginTop: 3 }}>{s.fecha} · {s.hora}</p>
+              <p style={{ fontFamily: FONT, fontSize: 14, color: white, fontWeight: 600 }}>{s.titulo || "Sesión de grabación"}</p>
+              <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>{s.fecha} · {s.hora}</p>
             </div>
-            <span className="px-2.5 py-1 rounded-full" style={{ background: blueSoft, color: blueLight, fontFamily: "Inter", fontSize: 10.5, fontWeight: 600 }}>{s.estado}</span>
+            <span className="px-2.5 py-1 rounded-full" style={{ background: blueSoft, color: blueLight, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>{s.estado}</span>
           </div>
         ))}
       </div>
@@ -562,18 +1024,31 @@ function ClientPortal({ userId }) {
   const [perfil, setPerfil] = useState(null);
   const [sesiones, setSesiones] = useState([]);
   const [notas, setNotas] = useState([]);
+  const [episodios, setEpisodios] = useState([]);
+  const [pagos, setPagos] = useState([]);
+  const [contenidos, setContenidos] = useState([]);
+  const [tablesMissing, setTablesMissing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: perfilData }, { data: sesionesData }, { data: notasData }] = await Promise.all([
+    const [{ data: perfilData }, { data: sesionesData }, { data: notasData }, ep, pg, ct] = await Promise.all([
       supabase.from("clientes").select("*").eq("id", userId).single(),
       supabase.from("sesiones").select("*").eq("cliente_id", userId).order("fecha", { ascending: false }),
       supabase.from("notas").select("*").eq("cliente_id", userId),
+      safeSelect("episodios", supabase.from("episodios").select("*").eq("cliente_id", userId).order("fecha_grabacion", { ascending: true })),
+      safeSelect("pagos", supabase.from("pagos").select("*").eq("cliente_id", userId).order("fecha_vencimiento", { ascending: false })),
+      safeSelect("contenidos", supabase.from("contenidos").select("*").eq("publicado", true).order("created_at", { ascending: false })),
     ]);
     setPerfil(perfilData);
     setSesiones(sesionesData || []);
     setNotas(notasData || []);
+    // La tabla episodios no tiene columna de número: el número es el orden
+    // cronológico por fecha de grabación.
+    setEpisodios(ep.data.map((e, i) => ({ ...e, numero: i + 1 })));
+    setPagos(pg.data);
+    setContenidos(ct.data);
+    setTablesMissing(ep.missing || pg.missing || ct.missing);
     setLoading(false);
   }, [userId]);
 
@@ -581,6 +1056,10 @@ function ClientPortal({ userId }) {
 
   const nav = [
     { id: "dashboard", label: "Panel", icon: Radio },
+    { id: "paquete", label: "Mi paquete", icon: Package },
+    { id: "entregas", label: "Mis entregas", icon: Sparkles },
+    { id: "pagos", label: "Pagos", icon: Wallet },
+    { id: "tips", label: "Tips y noticias", icon: Newspaper },
     { id: "book", label: "Agendar", icon: CalIcon },
     { id: "set", label: "Mi set", icon: Mic },
     { id: "history", label: "Historial", icon: FileText },
@@ -588,7 +1067,11 @@ function ClientPortal({ userId }) {
 
   return (
     <Shell nav={nav} view={view} setView={setView}>
-      {view === "dashboard" && <ClientDashboard perfil={perfil} goTo={setView} />}
+      {view === "dashboard" && <ClientDashboard perfil={perfil} sesiones={sesiones} episodios={episodios} pagos={pagos} goTo={setView} />}
+      {view === "paquete" && <PackageView perfil={perfil} sesiones={sesiones} episodios={episodios} />}
+      {view === "entregas" && <DeliveriesView episodios={episodios} loading={loading} missing={tablesMissing} onChanged={load} />}
+      {view === "pagos" && <PaymentsView pagos={pagos} perfil={perfil} loading={loading} missing={tablesMissing} />}
+      {view === "tips" && <TipsView contenidos={contenidos} loading={loading} missing={tablesMissing} />}
       {view === "book" && <BookSession userId={userId} perfil={perfil} onBooked={load} />}
       {view === "set" && <MySet notas={notas} loading={loading} />}
       {view === "history" && <History sesiones={sesiones} loading={loading} />}
@@ -621,28 +1104,31 @@ function AdminClientes() {
   return (
     <div>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Clientes</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Clientes</h1>
       <div className="mt-6 space-y-3">
-        {loading && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Cargando…</p>}
+        {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
         {clientes.map((c) => (
           <div key={c.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 14, color: white }}>{c.nombre || c.correo}</p>
-                <p style={{ fontFamily: "Inter", fontSize: 11.5, color: gray }}>{c.correo}</p>
+                <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{c.nombre || c.correo}</p>
+                <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>{c.correo}</p>
               </div>
-              <span className="px-2.5 py-1 rounded-full" style={{ background: c.activo ? blueSoft : "rgba(224,93,93,0.12)", color: c.activo ? blueLight : red, fontFamily: "Inter", fontSize: 10.5, fontWeight: 600 }}>
+              <span className="px-2.5 py-1 rounded-full" style={{ background: c.activo ? blueSoft : "rgba(224,93,93,0.12)", color: c.activo ? blueLight : red, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>
                 {c.activo ? "Activo" : "Pendiente"}
               </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <select value={c.paquete || ""} onChange={(e) => update(c.id, { paquete: e.target.value })} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: "Inter", fontSize: 12.5, border: "none" }}>
+              <select value={c.paquete || ""} onChange={(e) => update(c.id, { paquete: e.target.value })} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
                 <option value="">Sin paquete</option>
                 {PAQUETES.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
-              <input placeholder="Estado del proyecto" defaultValue={c.estado_proyecto || ""} onBlur={(e) => update(c.id, { estado_proyecto: e.target.value })} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: "Inter", fontSize: 12.5, border: "none" }} />
+              <input placeholder="Estado del proyecto" defaultValue={c.estado_proyecto || ""} onBlur={(e) => update(c.id, { estado_proyecto: e.target.value })} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }} />
             </div>
-            <button onClick={() => update(c.id, { activo: !c.activo })} className="mt-2 text-left" style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 12, color: blueLight }} disabled={savingId === c.id}>
+            {/* Modalidad, set y sesiones incluidas no son columnas de `clientes`
+                todavía: están en supabase/migrations/001_portal_inicio.sql como
+                paso opcional. El set se toma del último episodio grabado. */}
+            <button onClick={() => update(c.id, { activo: !c.activo })} className="mt-2 text-left" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }} disabled={savingId === c.id}>
               {savingId === c.id ? "Guardando…" : c.activo ? "Desactivar cuenta" : "Activar cuenta"}
             </button>
           </div>
@@ -667,17 +1153,336 @@ function AdminSesiones() {
   return (
     <div>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Todas las sesiones</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Todas las sesiones</h1>
       <div className="mt-6 space-y-3">
-        {loading && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Cargando…</p>}
-        {!loading && sesiones.length === 0 && <p style={{ fontFamily: "Inter", fontSize: 13, color: gray }}>Aún no hay sesiones agendadas.</p>}
+        {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
+        {!loading && sesiones.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Aún no hay sesiones agendadas.</p>}
         {sesiones.map((s) => (
           <div key={s.id} className="flex items-center justify-between p-4 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
             <div>
-              <p style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 14, color: white }}>{s.clientes?.nombre || s.clientes?.correo}</p>
-              <p style={{ fontFamily: "Inter", fontSize: 11.5, color: gray, marginTop: 3 }}>{s.fecha} · {s.hora}</p>
+              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{s.clientes?.nombre || s.clientes?.correo}</p>
+              <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>{s.fecha} · {s.hora}</p>
             </div>
-            <span className="px-2.5 py-1 rounded-full" style={{ background: blueSoft, color: blueLight, fontFamily: "Inter", fontSize: 10.5, fontWeight: 600 }}>{s.estado}</span>
+            <span className="px-2.5 py-1 rounded-full" style={{ background: blueSoft, color: blueLight, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>{s.estado}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function useClientesList() {
+  const [clientes, setClientes] = useState([]);
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("clientes").select("id, nombre, correo").order("created_at", { ascending: false });
+      setClientes(data || []);
+    })();
+  }, []);
+  return clientes;
+}
+
+function MissingTablesBanner() {
+  return (
+    <div className="rounded-2xl p-4 mb-4" style={{ background: amberBg, border: `1px solid ${amber}44` }}>
+      <p style={{ fontFamily: FONT, fontSize: 13, color: amber, lineHeight: 1.55 }}>
+        Faltan las tablas de entregas, pagos y contenidos. Aplica una vez la migración
+        <span style={{ fontWeight: 700 }}> supabase/migrations/001_portal_inicio.sql </span>
+        en el SQL Editor de Supabase y recarga.
+      </p>
+    </div>
+  );
+}
+
+function AdminEntregas() {
+  const clientes = useClientesList();
+  const [clienteId, setClienteId] = useState("");
+  const [episodios, setEpisodios] = useState([]);
+  const [missing, setMissing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [titulo, setTitulo] = useState("");
+  const [tipo, setTipo] = useState("podcast");
+  const [setNombre, setSetNombre] = useState("");
+  const [fechaGrab, setFechaGrab] = useState("");
+  const [fechaEntrega, setFechaEntrega] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async (cid) => {
+    if (!cid) { setEpisodios([]); return; }
+    setLoading(true);
+    const res = await safeSelect("episodios", supabase.from("episodios").select("*").eq("cliente_id", cid).order("fecha_grabacion", { ascending: true }));
+    setEpisodios(res.data.map((e, i) => ({ ...e, numero: i + 1 })));
+    setMissing(res.missing);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(clienteId); }, [clienteId, load]);
+
+  const setEtapa = async (ep, estado) => {
+    const { error } = await supabase.from("episodios").update({ estado }).eq("id", ep.id);
+    if (!error) load(clienteId);
+  };
+
+  const add = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!clienteId || !titulo) { setError("Elige cliente y título."); return; }
+    setSaving(true);
+    const { error } = await supabase.from("episodios").insert({
+      cliente_id: clienteId, titulo, tipo, set: setNombre || null,
+      estado: "grabado",
+      fecha_grabacion: fechaGrab || null, fecha_entrega: fechaEntrega || null,
+    });
+    if (error) setError(error.message);
+    else { setTitulo(""); setFechaGrab(""); setFechaEntrega(""); load(clienteId); }
+    setSaving(false);
+  };
+
+  return (
+    <div>
+      <Eyebrow>ADMINISTRACIÓN</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Entregas</h1>
+      {missing && <div className="mt-4"><MissingTablesBanner /></div>}
+      <div className="mt-6">
+        <label style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>CLIENTE</label>
+        <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className="w-full rounded-xl px-4 py-3" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+          <option value="">Selecciona un cliente</option>
+          {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre || c.correo}</option>)}
+        </select>
+      </div>
+      {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 16 }}>Cargando…</p>}
+      {!loading && clienteId && episodios.length === 0 && !missing && (
+        <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 16 }}>Sin episodios para este cliente. Agrega el primero abajo.</p>
+      )}
+      <div className="space-y-3 mt-4">
+        {episodios.map((ep) => (
+          <div key={ep.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <div className="flex items-center justify-between">
+              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>Episodio {ep.numero} — {ep.titulo}</p>
+              <EtapaPill etapa={ep.etapa} />
+            </div>
+            <div className="flex items-center gap-2 mt-3">
+              <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Etapa:</label>
+              <select value={ep.estado} onChange={(e) => setEtapa(ep, e.target.value)} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
+                {ETAPAS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+              {ep.set && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Set {ep.set.charAt(0) + ep.set.slice(1).toLowerCase()}</span>}
+              {ep.fecha_grabacion && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Grabado el {fmtFecha(ep.fecha_grabacion)}</span>}
+              {ep.fecha_entrega && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Entrega {fmtFecha(ep.fecha_entrega)}</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      {clienteId && !missing && (
+        <form onSubmit={add} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>AGREGAR EPISODIO</span>
+          <input placeholder="Título del episodio" value={titulo} onChange={(e) => setTitulo(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="rounded-xl px-3 py-2.5" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+              <option value="podcast">Podcast</option>
+              <option value="reel">Reel</option>
+              <option value="video">Video</option>
+            </select>
+            <select value={setNombre} onChange={(e) => setSetNombre(e.target.value)} className="rounded-xl px-3 py-2.5" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+              <option value="">Set (opcional)</option>
+              {["OCRE", "INDIGO", "NOGAL", "ONIX"].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Fecha de grabación
+              <input type="date" value={fechaGrab} onChange={(e) => setFechaGrab(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-1" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+            </label>
+            <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Fecha de entrega
+              <input type="date" value={fechaEntrega} onChange={(e) => setFechaEntrega(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-1" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+            </label>
+          </div>
+          <ErrorBanner message={error} />
+          <div className="mt-3">
+            <PillButton type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : "Agregar episodio"}</PillButton>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function AdminPagos() {
+  const clientes = useClientesList();
+  const [clienteId, setClienteId] = useState("");
+  const [pagos, setPagos] = useState([]);
+  const [missing, setMissing] = useState(false);
+  const [monto, setMonto] = useState("");
+  const [concepto, setConcepto] = useState("");
+  const [estado, setEstado] = useState("pagado");
+  const [fechaVenc, setFechaVenc] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async (cid) => {
+    if (!cid) { setPagos([]); return; }
+    const res = await safeSelect("pagos", supabase.from("pagos").select("*").eq("cliente_id", cid).order("fecha", { ascending: false }));
+    setPagos(res.data);
+    setMissing(res.missing);
+  }, []);
+
+  useEffect(() => { load(clienteId); }, [clienteId, load]);
+
+  const pagado = pagos.filter((p) => p.estado === "pagado").reduce((a, p) => a + Number(p.monto || 0), 0);
+  const pendiente = pagos.filter((p) => p.estado === "pendiente").reduce((a, p) => a + Number(p.monto || 0), 0);
+
+  const add = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!clienteId || !monto || !concepto) { setError("Elige cliente, monto y concepto."); return; }
+    setSaving(true);
+    const hoy = new Date().toISOString().slice(0, 10);
+    const { error } = await supabase.from("pagos").insert({
+      cliente_id: clienteId, monto: Number(monto), concepto, estado,
+      fecha_vencimiento: fechaVenc || hoy,
+      fecha_pago: estado === "pagado" ? hoy : null,
+    });
+    if (error) setError(error.message);
+    else { setMonto(""); setConcepto(""); setFechaVenc(""); load(clienteId); }
+    setSaving(false);
+  };
+
+  const remove = async (id) => {
+    await supabase.from("pagos").delete().eq("id", id);
+    load(clienteId);
+  };
+
+  return (
+    <div>
+      <Eyebrow>ADMINISTRACIÓN</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Pagos</h1>
+      {missing && <div className="mt-4"><MissingTablesBanner /></div>}
+      <div className="mt-6">
+        <label style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>CLIENTE</label>
+        <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className="w-full rounded-xl px-4 py-3" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+          <option value="">Selecciona un cliente</option>
+          {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre || c.correo}</option>)}
+        </select>
+      </div>
+      {clienteId && !missing && (
+        <>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+              <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>PAGADO</span>
+              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: green, marginTop: 6 }}>{fmtMoney(pagado)}</p>
+            </div>
+            <div className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+              <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>PENDIENTE</span>
+              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: pendiente > 0 ? amber : white, marginTop: 6 }}>{fmtMoney(pendiente)}</p>
+            </div>
+          </div>
+          <div className="space-y-2 mt-4">
+            {pagos.map((p) => (
+              <div key={p.id} className="flex items-center justify-between p-3 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+                <div>
+                  <p style={{ fontFamily: FONT, fontSize: 13.5, color: white }}>{p.concepto}</p>
+                  <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>{p.estado === "pagado" ? (p.fecha_pago ? `Pagado el ${fmtFecha(p.fecha_pago)}` : "Pagado ✓") : `Vence el ${fmtFecha(p.fecha_vencimiento)}`}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <b style={{ fontFamily: FONT, fontSize: 14, color: white }}>{fmtMoney(p.monto)}</b>
+                  <button onClick={() => remove(p.id)} title="Eliminar pago"><Trash2 size={15} color={red} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <form onSubmit={add} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>REGISTRAR UN PAGO</span>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <input type="number" min="1" step="0.01" placeholder="Monto ($)" value={monto} onChange={(e) => setMonto(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+              <select value={estado} onChange={(e) => setEstado(e.target.value)} className="rounded-xl px-3 py-2.5" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+                <option value="pagado">Pagado</option>
+                <option value="pendiente">Pendiente</option>
+              </select>
+            </div>
+            <input placeholder="Concepto (p. ej. Anticipo mensual Impacto)" value={concepto} onChange={(e) => setConcepto(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+            <label style={{ fontFamily: FONT, fontSize: 12, color: gray, display: "block", marginTop: 10 }}>Fecha de vencimiento
+              <input type="date" value={fechaVenc} onChange={(e) => setFechaVenc(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-1" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+            </label>
+            <ErrorBanner message={error} />
+            <div className="mt-3">
+              <PillButton type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : "Guardar pago"}</PillButton>
+            </div>
+          </form>
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminTips() {
+  const [items, setItems] = useState([]);
+  const [missing, setMissing] = useState(false);
+  const [titulo, setTitulo] = useState("");
+  const [cuerpo, setCuerpo] = useState("");
+  const [tipo, setTipo] = useState("tip");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    const res = await safeSelect("contenidos", supabase.from("contenidos").select("*").order("created_at", { ascending: false }));
+    setItems(res.data);
+    setMissing(res.missing);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const publish = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!titulo || !cuerpo) { setError("Escribe título y texto."); return; }
+    setSaving(true);
+    const { error } = await supabase.from("contenidos").insert({ titulo, cuerpo, tipo });
+    if (error) setError(error.message);
+    else { setTitulo(""); setCuerpo(""); load(); }
+    setSaving(false);
+  };
+
+  const toggle = async (it) => {
+    await supabase.from("contenidos").update({ publicado: !it.publicado }).eq("id", it.id);
+    load();
+  };
+
+  const remove = async (id) => {
+    await supabase.from("contenidos").delete().eq("id", id);
+    load();
+  };
+
+  return (
+    <div>
+      <Eyebrow>ADMINISTRACIÓN</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Tips y noticias</h1>
+      {missing && <div className="mt-4"><MissingTablesBanner /></div>}
+      <form onSubmit={publish} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>PUBLICAR UN TIP O NOTICIA</span>
+        <input placeholder="Título" value={titulo} onChange={(e) => setTitulo(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        <textarea placeholder="Texto para los clientes…" value={cuerpo} onChange={(e) => setCuerpo(e.target.value)} rows={3} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14, resize: "none" }} />
+        <div className="flex gap-2 mt-2">
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="rounded-xl px-3 py-2.5" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+            <option value="tip">Tip</option>
+            <option value="noticia">Noticia del estudio</option>
+          </select>
+          <PillButton type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : "Publicar"}</PillButton>
+        </div>
+        <ErrorBanner message={error} />
+        <p style={{ fontFamily: FONT, fontSize: 12.5, color: gray, marginTop: 10 }}>Aparece en “Tips y noticias” de todos los clientes.</p>
+      </form>
+      <div className="space-y-3 mt-4">
+        {items.map((it) => (
+          <div key={it.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}`, opacity: it.publicado ? 1 : 0.55 }}>
+            <div className="flex items-center justify-between">
+              <span className="px-2.5 py-1 rounded-full" style={{ background: it.tipo === "noticia" ? blueSoft : cardAlt, color: it.tipo === "noticia" ? blueLight : gray, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>
+                {it.tipo === "noticia" ? "Noticia" : "Tip"}
+              </span>
+              <div className="flex items-center gap-3">
+                <button onClick={() => toggle(it)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }}>{it.publicado ? "Ocultar" : "Mostrar"}</button>
+                <button onClick={() => remove(it.id)} title="Eliminar"><Trash2 size={15} color={red} /></button>
+              </div>
+            </div>
+            <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white, marginTop: 8 }}>{it.titulo}</p>
+            <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 4, lineHeight: 1.55 }}>{it.cuerpo}</p>
           </div>
         ))}
       </div>
@@ -714,21 +1519,21 @@ function AdminNotas() {
   return (
     <div>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
-      <h1 style={{ fontFamily: "Fredoka", fontWeight: 600, fontSize: 26, color: white }}>Agregar nota</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Agregar nota</h1>
       <form onSubmit={submit} className="mt-6">
-        <label style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>CLIENTE</label>
-        <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className="w-full rounded-xl px-4 py-3 mb-4" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: "Inter", fontSize: 14 }}>
+        <label style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>CLIENTE</label>
+        <select value={clienteId} onChange={(e) => setClienteId(e.target.value)} className="w-full rounded-xl px-4 py-3 mb-4" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
           <option value="">Selecciona un cliente</option>
           {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre || c.correo}</option>)}
         </select>
-        <label style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>TIPO</label>
-        <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full rounded-xl px-4 py-3 mb-4" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: "Inter", fontSize: 14 }}>
+        <label style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>TIPO</label>
+        <select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full rounded-xl px-4 py-3 mb-4" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
           <option value="tecnica">Técnica</option>
           <option value="creativa">Creativa</option>
           <option value="requisito">Requisito</option>
         </select>
-        <label style={{ fontFamily: "Inter", fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>NOTA</label>
-        <textarea value={contenido} onChange={(e) => setContenido(e.target.value)} rows={4} className="w-full rounded-xl px-4 py-3 mb-4 outline-none" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: "Inter", fontSize: 14, resize: "none" }} placeholder="Escribe la nota…" />
+        <label style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, display: "block", marginBottom: 6 }}>NOTA</label>
+        <textarea value={contenido} onChange={(e) => setContenido(e.target.value)} rows={4} className="w-full rounded-xl px-4 py-3 mb-4 outline-none" style={{ background: card, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14, resize: "none" }} placeholder="Escribe la nota…" />
         <PillButton full type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : done ? "Guardada ✓" : "Guardar nota"}</PillButton>
       </form>
     </div>
@@ -740,12 +1545,18 @@ function AdminPortal() {
   const nav = [
     { id: "clientes", label: "Clientes", icon: Users },
     { id: "sesiones", label: "Sesiones", icon: CalIcon },
+    { id: "entregas", label: "Entregas", icon: Sparkles },
+    { id: "pagos", label: "Pagos", icon: Wallet },
+    { id: "tips", label: "Tips y noticias", icon: Newspaper },
     { id: "notas", label: "Agregar nota", icon: FileText },
   ];
   return (
     <Shell nav={nav} view={view} setView={setView}>
       {view === "clientes" && <AdminClientes />}
       {view === "sesiones" && <AdminSesiones />}
+      {view === "entregas" && <AdminEntregas />}
+      {view === "pagos" && <AdminPagos />}
+      {view === "tips" && <AdminTips />}
       {view === "notas" && <AdminNotas />}
     </Shell>
   );
