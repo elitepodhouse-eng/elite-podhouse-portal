@@ -4,7 +4,15 @@ import {
   ArrowRight, Users, Loader2, AlertCircle, CheckCircle2, ChevronLeft, ChevronRight,
   Wallet, Package, Sparkles, Newspaper, Banknote, Trash2
 } from "lucide-react";
-import { supabase, ADMIN_EMAIL } from "./supabaseClient";
+import { supabase, isAdminEmail } from "./supabaseClient";
+import AdminPropuestas from "./admin/Propuestas";
+import AdminCotizador from "./admin/Cotizador";
+import AdminContratos from "./admin/Contratos";
+import AdminCobranza from "./admin/Cobranza";
+import AdminHoy from "./admin/Hoy";
+import AdminFinanzas from "./admin/Finanzas";
+import AdminFacturacion from "./admin/Facturacion";
+import AdminAjustes from "./admin/Ajustes";
 
 // Identidad Élite Podhouse (la misma de la vista previa aprobada por Tania)
 const navy = "#0B1338";
@@ -1541,21 +1549,37 @@ function AdminNotas() {
 }
 
 function AdminPortal() {
-  const [view, setView] = useState("clientes");
+  const [view, setView] = useState("hoy");
   const nav = [
+    { id: "hoy", label: "Hoy", icon: CalIcon },
     { id: "clientes", label: "Clientes", icon: Users },
     { id: "sesiones", label: "Sesiones", icon: CalIcon },
     { id: "entregas", label: "Entregas", icon: Sparkles },
     { id: "pagos", label: "Pagos", icon: Wallet },
+    { id: "propuestas", label: "Propuestas", icon: FileText },
+    { id: "cotizador", label: "Cotizador", icon: FileText },
+    { id: "contratos", label: "Contratos", icon: FileText },
+    { id: "cobranza", label: "Cobranza", icon: FileText },
+    { id: "finanzas", label: "Finanzas", icon: FileText },
+    { id: "facturacion", label: "Facturación", icon: FileText },
+    { id: "ajustes", label: "Ajustes", icon: FileText },
     { id: "tips", label: "Tips y noticias", icon: Newspaper },
     { id: "notas", label: "Agregar nota", icon: FileText },
   ];
   return (
     <Shell nav={nav} view={view} setView={setView}>
+      {view === "hoy" && <AdminHoy />}
       {view === "clientes" && <AdminClientes />}
       {view === "sesiones" && <AdminSesiones />}
       {view === "entregas" && <AdminEntregas />}
       {view === "pagos" && <AdminPagos />}
+      {view === "propuestas" && <AdminPropuestas />}
+      {view === "cotizador" && <AdminCotizador />}
+      {view === "contratos" && <AdminContratos />}
+      {view === "cobranza" && <AdminCobranza />}
+      {view === "finanzas" && <AdminFinanzas />}
+      {view === "facturacion" && <AdminFacturacion />}
+      {view === "ajustes" && <AdminAjustes />}
       {view === "tips" && <AdminTips />}
       {view === "notas" && <AdminNotas />}
     </Shell>
@@ -1588,6 +1612,7 @@ export default function App() {
 
   if (!session) return <AuthScreen />;
 
-  const isAdmin = session.user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+  // Admin = lista VITE_ADMIN_EMAILS (Tania + Alejandro cuando Tania dé su correo).
+  const isAdmin = isAdminEmail(session.user.email);
   return isAdmin ? <AdminPortal /> : <ClientPortal userId={session.user.id} />;
 }
