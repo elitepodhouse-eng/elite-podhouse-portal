@@ -502,12 +502,14 @@ function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
   const precio = perfil?.paquete ? PRECIOS[perfil.paquete] : null;
   const incluidos = perfil?.sesiones_incluidas || null;
   const ultimoSet = [...episodios].sort((a, b) => String(b.fecha_grabacion || "").localeCompare(String(a.fecha_grabacion || "")))[0]?.set;
+  // Nombre a mostrar: nombre real, si no el usuario, si no el correo (nunca el correo interno @elitepodhouse.local de los usuarios con usuario).
+  const nombrePanel = perfil?.nombre || perfil?.usuario || (perfil?.correo && !perfil.correo.endsWith("@elitepodhouse.local") ? perfil.correo : "");
 
   return (
     <div>
-      <Eyebrow>PANEL DE {(perfil?.nombre || perfil?.correo || "").split(" ")[0].toUpperCase()}</Eyebrow>
+      <Eyebrow>{nombrePanel ? `PANEL DE ${nombrePanel.split(" ")[0].toUpperCase()}` : "PANEL DE CLIENTE"}</Eyebrow>
       <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 28, color: white }}>
-        Hola{perfil?.nombre ? `, ${perfil.nombre.split(" ")[0]}` : ""} 👋
+        Hola{perfil?.nombre ? `, ${perfil.nombre.split(" ")[0]}` : perfil?.usuario ? `, ${perfil.usuario}` : ""} 👋
       </h1>
       {perfil?.activo ? (
         <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 6 }}>
