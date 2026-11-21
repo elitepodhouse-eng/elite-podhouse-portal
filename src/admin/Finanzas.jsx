@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, Kpi, inputStyle, labelStyle, card, cardAlt, white, gray, blueLight, blueSoft, green, greenBg, amber, red, FONT } from "../lib/ui";
 import { safeSelect, fmtMoney, fmtFecha, todayISO, useConfig, r2 } from "../lib/ops";
+import { subirComprobante, ComprobanteValor } from "../lib/comprobantes.jsx";
 import { pdfReciboColab } from "../lib/pdf";
 
 const CAT_EGRESO = ["Equipo y estudio", "Software y suscripciones", "Marketing y publicidad", "Renta y servicios", "Sueldos y colaboradores", "Impuestos", "Transporte", "Otros"];
@@ -76,6 +77,7 @@ export default function AdminFinanzas() {
   const [pcMetodo, setPcMetodo] = useState("Transferencia");
   const [pcNota, setPcNota] = useState("");
   const [pcComprobante, setPcComprobante] = useState("");
+  const [pcArchivo, setPcArchivo] = useState(null);
   const [pcSaving, setPcSaving] = useState(false);
 
   const failMsg = "Falta aplicar la migración supabase/migrations/002_finanzas_facturacion.sql en Supabase.";
@@ -112,9 +114,19 @@ export default function AdminFinanzas() {
     setError(""); setOk("");
     if (!pcConcepto || !pcMonto) { setError("Escribe concepto y monto."); return; }
     setPcSaving(true);
-    const { error } = await supabase.from("pagos_colaboradores").insert({ colaborador_id: selColab.id, fecha: pcFecha || todayISO(), concepto: pcConcepto, monto: Number(pcMonto), metodo: pcMetodo, nota: pcNota || null, comprobante_url: pcComprobante || null });
+    let comprobante = pcComprobante || null;
+    if (pcArchivo) {
+      try {
+        comprobante = await subirComprobante(pcArchivo);
+      } catch (err) {
+        setError(err.message);
+        setPcSaving(false);
+        return;
+      }
+    }
+    const { error } = await supabase.from("pagos_colaboradores").insert({ colaborador_id: selColab.id, fecha: pcFecha || todayISO(), concepto: pcConcepto, monto: Number(pcMonto), metodo: pcMetodo, nota: pcNota || null, comprobante_url: comprobante });
     if (error) setError(error.code === "PGRST205" ? failMsg : error.message);
-    else { setPcConcepto(""); setPcMonto(""); setPcNota(""); setPcComprobante(""); setOk("Pago registrado."); load(); }
+    else { setPcConcepto(""); setPcMonto(""); setPcNota(""); setPcComprobante(""); setPcArchivo(null); setOk("Pago registrado."); load(); }
     setPcSaving(false);
   };
   const delMov = async (id) => { await supabase.from("movimientos").delete().eq("id", id); load(); };
@@ -296,7 +308,7 @@ export default function AdminFinanzas() {
                   <div key={p.id} className="flex items-center justify-between p-3 rounded-xl" style={{ background: "#0B1338", border: `1px solid ${cardAlt}` }}>
                     <div>
                       <p style={{ fontFamily: FONT, fontSize: 13, color: white }}>{fmtMoney(p.monto)} · {p.concepto || ""}{p.fecha ? ` · ${fmtFecha(p.fecha)}` : ""}</p>
-                      {p.comprobante_url && <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>Comprobante: {p.comprobante_url}</p>}
+                      {p.comprobante_url && <p style={{ fontFamily: FONT, fontSize: 11.5, marginTop: 2 }}><ComprobanteValor valor={p.comprobante_url} /></p>}
                     </div>
                     <div className="flex gap-3">
                       <button onClick={() => pdfReciboColab({ id: p.id, colaborador: selColab.nombre, concepto: p.concepto, monto: Number(p.monto), fecha: p.fecha, metodo: p.metodo })} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Recibo PDF</button>
@@ -317,6 +329,11 @@ export default function AdminFinanzas() {
                 </div>
                 <input placeholder="Concepto" value={pcConcepto} onChange={(e) => setPcConcepto(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={inputStyle} />
                 <input placeholder="Comprobante (nombre o nota, opcional)" value={pcComprobante} onChange={(e) => setPcComprobante(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={inputStyle} />
+                <label style={{ fontFamily: FONT, fontSize: 12, color: gray, display: "block", marginTop: 8 }}>
+                  O sube el archivo del comprobante (imagen o PDF, máx. 20 MB)
+                  <input type="file" accept="image/*,.pdf" onChange={(e) => setPcArchivo(e.target.files?.[0] || null)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-1" style={{ ...inputStyle, padding: "8px 12px" }} />
+                </label>
+                {pcArchivo && <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 4 }}>Archivo elegido: {pcArchivo.name}</p>}
                 <ErrorBanner message={error} />
                 <div className="mt-2"><PillButton type="submit" disabled={pcSaving}>{pcSaving ? "Guardando…" : "Guardar pago"}</PillButton></div>
               </form>

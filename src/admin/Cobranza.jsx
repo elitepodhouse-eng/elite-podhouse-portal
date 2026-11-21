@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, Kpi, inputStyle, labelStyle, card, cardAlt, white, gray, blueLight, green, amber, red, FONT } from "../lib/ui";
 import { safeSelect, safeLoadClientes, waUrl, fmtMoney, fmtFecha, todayISO, r2 } from "../lib/ops";
+import { subirComprobante, ComprobanteValor } from "../lib/comprobantes.jsx";
 import { pdfRecibo } from "../lib/pdf";
 
 const METODOS = ["Transferencia", "Tarjeta", "Efectivo", "Otro"];
@@ -32,6 +33,7 @@ export default function AdminCobranza() {
   const [abFecha, setAbFecha] = useState(todayISO());
   const [abMetodo, setAbMetodo] = useState("Transferencia");
   const [abComprobante, setAbComprobante] = useState("");
+  const [abArchivo, setAbArchivo] = useState(null);
   const [abSaving, setAbSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -83,15 +85,25 @@ export default function AdminCobranza() {
     setError(""); setOk("");
     if (!abMonto) { setError("Escribe el monto del abono."); return; }
     setAbSaving(true);
+    let comprobante = abComprobante || null;
+    if (abArchivo) {
+      try {
+        comprobante = await subirComprobante(abArchivo);
+      } catch (err) {
+        setError(err.message);
+        setAbSaving(false);
+        return;
+      }
+    }
     const { error } = await supabase.from("abonos").insert({
       factura_id: sel.id,
       monto: Number(abMonto),
       fecha: abFecha || hoy,
       metodo: abMetodo,
-      comprobante_url: abComprobante || null,
+      comprobante_url: comprobante,
     });
     if (error) setError(error.message);
-    else { setAbMonto(""); setAbComprobante(""); setOk("Abono registrado."); load(); }
+    else { setAbMonto(""); setAbComprobante(""); setAbArchivo(null); setOk("Abono registrado."); load(); }
     setAbSaving(false);
   };
 
@@ -161,7 +173,7 @@ export default function AdminCobranza() {
               <div key={a.id} className="flex items-center justify-between p-3 rounded-xl" style={{ background: "#0B1338", border: `1px solid ${cardAlt}` }}>
                 <div>
                   <p style={{ fontFamily: FONT, fontSize: 13, color: white }}>{fmtMoney(a.monto)} · {a.metodo || ""}{a.fecha ? ` · ${fmtFecha(a.fecha)}` : ""}</p>
-                  {a.comprobante_url && <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>Comprobante: {a.comprobante_url}</p>}
+                  {a.comprobante_url && <p style={{ fontFamily: FONT, fontSize: 11.5, marginTop: 2 }}><ComprobanteValor valor={a.comprobante_url} /></p>}
                 </div>
                 <button onClick={() => recibo(sel, a, i)} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Recibo {folio(sel, i + 1)}</button>
               </div>
@@ -177,7 +189,12 @@ export default function AdminCobranza() {
                 {METODOS.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
-            <input placeholder="Comprobante (nombre o nota, opcional — por ahora no se sube archivo)" value={abComprobante} onChange={(e) => setAbComprobante(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={inputStyle} />
+            <input placeholder="Comprobante (nombre o nota, opcional)" value={abComprobante} onChange={(e) => setAbComprobante(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={inputStyle} />
+            <label style={{ fontFamily: FONT, fontSize: 12, color: gray, display: "block", marginTop: 8 }}>
+              O sube el archivo del comprobante (imagen o PDF, máx. 20 MB)
+              <input type="file" accept="image/*,.pdf" onChange={(e) => setAbArchivo(e.target.files?.[0] || null)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-1" style={{ ...inputStyle, padding: "8px 12px" }} />
+            </label>
+            {abArchivo && <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 4 }}>Archivo elegido: {abArchivo.name}</p>}
             <ErrorBanner message={error} />
             <OkBanner message={ok} />
             <div className="flex gap-2 flex-wrap mt-2">
