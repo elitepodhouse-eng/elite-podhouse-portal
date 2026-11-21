@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "../supabaseClient";
 import { Eyebrow, SectionTitle, EmptyNote, MissingTablesBanner, Kpi, card, cardAlt, white, gray, blueLight, green, amber, red, FONT } from "../lib/ui";
-import { safeSelect, fmtMoney, fmtFecha, todayISO, r2 } from "../lib/ops";
+import { safeSelect, fmtMoney, fmtFecha, todayISO, r2, filtrarClientes } from "../lib/ops";
 
 function Row({ titulo, sub, alerta }) {
   return (
@@ -46,7 +46,7 @@ export default function AdminHoy() {
       const c = await supabase.from("clientes").select("id, nombre, correo, proximo_contacto");
       const s = await safeSelect("sesiones", supabase.from("sesiones").select("*"));
       setEpisodios(e.data); setPropuestas(p.data); setFacturas(f.data); setAbonos(a.data);
-      setClientes(c.data || []); setSesiones(s.data);
+      setClientes(filtrarClientes(c.data)); setSesiones(s.data);
       setMissing(e.missing || p.missing || f.missing || a.missing);
       setLoading(false);
     })();

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "../supabaseClient";
+import { supabase, isAdminEmail } from "../supabaseClient";
 
 // ---------- Formato ----------
 export const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -32,7 +32,17 @@ export async function safeSelect(table, query) {
 
 export async function safeLoadClientes() {
   const { data } = await supabase.from("clientes").select("id, nombre, correo, telefono, paquete").order("created_at", { ascending: false });
-  return data || [];
+  return filtrarClientes(data);
+}
+
+// Las cuentas del estudio (Tania y Alejandro) NO son clientes: nunca se
+// listan como clientes en ningún desplegable ni lista. Sus filas siguen en
+// la base; solo no se muestran.
+export function esCuentaEstudio(c) {
+  return !!c?.correo && isAdminEmail(c.correo);
+}
+export function filtrarClientes(rows) {
+  return (rows || []).filter((c) => !esCuentaEstudio(c));
 }
 
 // ---------- WhatsApp ----------

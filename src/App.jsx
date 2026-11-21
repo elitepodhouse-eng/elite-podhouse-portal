@@ -122,6 +122,29 @@ async function safeSelect(table, query) {
   }
 }
 
+// Las cuentas del estudio (Tania y Alejandro) NO son clientes: se filtran
+// de todas las listas y desplegables de clientes. Sus filas siguen en la
+// base; solo no se muestran como clientes.
+const filtrarCuentasEstudio = (rows) => (rows || []).filter((c) => !isAdminEmail(c?.correo));
+
+// Saldo único del cliente: las facturas de Cobranza son la fuente de verdad
+// (saldo = monto − abonos); los pagos manuales de la tabla `pagos` se suman
+// aparte, sin duplicar. No escribe nada: solo deriva en lectura.
+function saldoCliente(facturas, abonos, pagos) {
+  const abonosPorFactura = {};
+  (abonos || []).forEach((a) => { abonosPorFactura[a.factura_id] = (abonosPorFactura[a.factura_id] || 0) + Number(a.monto || 0); });
+  let pendienteF = 0, pagadoF = 0;
+  (facturas || []).forEach((f) => {
+    const m = Number(f.monto || 0);
+    const ab = Math.min(m, abonosPorFactura[f.id] || 0);
+    pagadoF += ab;
+    pendienteF += Math.max(0, m - ab);
+  });
+  const pagadoM = (pagos || []).filter((p) => p.estado === "pagado").reduce((a, p) => a + Number(p.monto || 0), 0);
+  const pendienteM = (pagos || []).filter((p) => p.estado === "pendiente").reduce((a, p) => a + Number(p.monto || 0), 0);
+  return { pendiente: pendienteF + pendienteM, pagado: pagadoF + pagadoM, pendienteFacturas: pendienteF, pagadoFacturas: pagadoF };
+}
+
 // ---------- UI atoms ----------
 function Eyebrow({ children }) {
   return (
@@ -485,7 +508,7 @@ function MiCuentaCard({ perfil }) {
   );
 }
 
-function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
+function ClientDashboard({ perfil, sesiones, episodios, pagos, facturas, abonos, goTo }) {
   const now = new Date();
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -497,8 +520,8 @@ function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
   const enCurso = [...episodios]
     .filter((e) => e.estado !== "publicado")
     .sort((a, b) => (ETAPA_PRIORIDAD[b.estado] - ETAPA_PRIORIDAD[a.estado]) || (b.numero - a.numero))[0];
-  const pagado = pagos.filter((p) => p.estado === "pagado").reduce((acc, p) => acc + Number(p.monto || 0), 0);
-  const pendiente = pagos.filter((p) => p.estado === "pendiente").reduce((acc, p) => acc + Number(p.monto || 0), 0);
+  // Saldo único: facturas de Cobranza (fuente de verdad) + pagos manuales.
+  const { pendiente, pagado } = saldoCliente(facturas, abonos, pagos);
   const precio = perfil?.paquete ? PRECIOS[perfil.paquete] : null;
   const incluidos = perfil?.sesiones_incluidas || null;
   const ultimoSet = [...episodios].sort((a, b) => String(b.fecha_grabacion || "").localeCompare(String(a.fecha_grabacion || "")))[0]?.set;
@@ -585,7 +608,7 @@ function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
             <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>{fmtMoney(pendiente)}</span>
           </div>
           <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6 }}>
-            {pagos.length === 0
+            {pagos.length === 0 && (facturas || []).length === 0
               ? "Aún no hay pagos registrados para tu paquete."
               : `Pagado ${fmtMoney(pagado)}${pendiente > 0 ? " · el resto se paga por adelantado antes de grabar." : " · al corriente."}`}
           </p>
@@ -769,11 +792,15 @@ function DeliveriesView({ episodios, loading, missing, onChanged }) {
   );
 }
 
-function PaymentsView({ pagos, perfil, loading, missing }) {
-  const pagado = pagos.filter((p) => p.estado === "pagado").reduce((acc, p) => acc + Number(p.monto || 0), 0);
-  const pendiente = pagos.filter((p) => p.estado === "pendiente").reduce((acc, p) => acc + Number(p.monto || 0), 0);
+function PaymentsView({ pagos, facturas, abonos, perfil, loading, missing }) {
+  // Saldo único: facturas de Cobranza (fuente de verdad) + pagos manuales.
+  const { pendiente, pagado } = saldoCliente(facturas, abonos, pagos);
   const total = pagado + pendiente;
   const precio = perfil?.paquete ? PRECIOS[perfil.paquete] : null;
+  const abonosPorFactura = {};
+  (abonos || []).forEach((a) => { abonosPorFactura[a.factura_id] = (abonosPorFactura[a.factura_id] || 0) + Number(a.monto || 0); });
+  const saldoFactura = (f) => Math.max(0, Number(f.monto || 0) - (abonosPorFactura[f.id] || 0));
+  const hoy = new Date().toISOString().slice(0, 10);
 
   return (
     <div>
@@ -794,6 +821,22 @@ function PaymentsView({ pagos, perfil, loading, missing }) {
           <div className="flex justify-between mt-2" style={{ fontFamily: FONT, fontSize: 13.5, color: gray }}><span>Pendiente</span><b style={{ color: white }}>{fmtMoney(pendiente)}</b></div>
           <div className="flex justify-between mt-2" style={{ fontFamily: FONT, fontSize: 13.5, color: gray }}><span>Total registrado</span><b style={{ color: white }}>{fmtMoney(total)}</b></div>
         </Card>
+        {(facturas || []).length > 0 && (
+          <Card>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>FACTURAS</span>
+            {facturas.map((f) => {
+              const saldo = saldoFactura(f);
+              const vencida = saldo > 0 && f.vencimiento && f.vencimiento < hoy;
+              const abonado = Math.min(Number(f.monto || 0), abonosPorFactura[f.id] || 0);
+              return (
+                <div key={f.id} className="flex items-center justify-between mt-3" style={{ fontFamily: FONT, fontSize: 13.5 }}>
+                  <span style={{ color: gray }}>{f.concepto}{f.vencimiento ? ` · vence ${fmtFecha(f.vencimiento)}` : ""}{vencida ? " · VENCIDA" : ""} · abonado {fmtMoney(abonado)} de {fmtMoney(f.monto)}</span>
+                  <b style={{ color: saldo > 0 ? (vencida ? red : amber) : green }}>{saldo > 0 ? fmtMoney(saldo) : "Pagada ✓"}</b>
+                </div>
+              );
+            })}
+          </Card>
+        )}
         <Card>
           <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>HISTORIAL</span>
           {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 10 }}>Cargando…</p>}
@@ -1102,19 +1145,25 @@ function ClientPortal({ userId }) {
   const [notas, setNotas] = useState([]);
   const [episodios, setEpisodios] = useState([]);
   const [pagos, setPagos] = useState([]);
+  const [facturas, setFacturas] = useState([]);
+  const [abonos, setAbonos] = useState([]);
   const [contenidos, setContenidos] = useState([]);
   const [tablesMissing, setTablesMissing] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: perfilData }, { data: sesionesData }, { data: notasData }, ep, pg, ct] = await Promise.all([
+    const [{ data: perfilData }, { data: sesionesData }, { data: notasData }, ep, pg, ct, fc, ab] = await Promise.all([
       supabase.from("clientes").select("*").eq("id", userId).single(),
       supabase.from("sesiones").select("*").eq("cliente_id", userId).order("fecha", { ascending: false }),
       supabase.from("notas").select("*").eq("cliente_id", userId),
       safeSelect("episodios", supabase.from("episodios").select("*").eq("cliente_id", userId).order("fecha_grabacion", { ascending: true })),
       safeSelect("pagos", supabase.from("pagos").select("*").eq("cliente_id", userId).order("fecha_vencimiento", { ascending: false })),
       safeSelect("contenidos", supabase.from("contenidos").select("*").eq("publicado", true).order("created_at", { ascending: false })),
+      // Adeudo real: las facturas de Cobranza (+ sus abonos) son la fuente
+      // de verdad de "Lo que debes"; los pagos manuales se suman aparte.
+      safeSelect("facturas", supabase.from("facturas").select("*").eq("cliente_id", userId).order("fecha", { ascending: false })),
+      safeSelect("abonos", supabase.from("abonos").select("*").order("fecha", { ascending: false })),
     ]);
     setPerfil(perfilData);
     setSesiones(sesionesData || []);
@@ -1123,8 +1172,11 @@ function ClientPortal({ userId }) {
     // cronológico por fecha de grabación.
     setEpisodios(ep.data.map((e, i) => ({ ...e, numero: i + 1 })));
     setPagos(pg.data);
+    setFacturas(fc.data);
+    const idsFacturas = new Set((fc.data || []).map((f) => f.id));
+    setAbonos((ab.data || []).filter((a) => idsFacturas.has(a.factura_id)));
     setContenidos(ct.data);
-    setTablesMissing(ep.missing || pg.missing || ct.missing);
+    setTablesMissing(ep.missing || pg.missing || ct.missing || fc.missing || ab.missing);
     setLoading(false);
   }, [userId]);
 
@@ -1143,10 +1195,10 @@ function ClientPortal({ userId }) {
 
   return (
     <Shell nav={nav} view={view} setView={setView}>
-      {view === "dashboard" && <ClientDashboard perfil={perfil} sesiones={sesiones} episodios={episodios} pagos={pagos} goTo={setView} />}
+      {view === "dashboard" && <ClientDashboard perfil={perfil} sesiones={sesiones} episodios={episodios} pagos={pagos} facturas={facturas} abonos={abonos} goTo={setView} />}
       {view === "paquete" && <PackageView perfil={perfil} sesiones={sesiones} episodios={episodios} />}
       {view === "entregas" && <DeliveriesView episodios={episodios} loading={loading} missing={tablesMissing} onChanged={load} />}
-      {view === "pagos" && <PaymentsView pagos={pagos} perfil={perfil} loading={loading} missing={tablesMissing} />}
+      {view === "pagos" && <PaymentsView pagos={pagos} facturas={facturas} abonos={abonos} perfil={perfil} loading={loading} missing={tablesMissing} />}
       {view === "tips" && <TipsView contenidos={contenidos} loading={loading} missing={tablesMissing} />}
       {view === "book" && <BookSession userId={userId} perfil={perfil} onBooked={load} />}
       {view === "set" && <MySet notas={notas} loading={loading} />}
@@ -1196,7 +1248,7 @@ function AdminClientes() {
   const load = useCallback(async () => {
     setLoading(true);
     const { data } = await supabase.from("clientes").select("*").order("created_at", { ascending: false });
-    setClientes(data || []);
+    setClientes(filtrarCuentasEstudio(data));
     setLoading(false);
   }, []);
 
@@ -1376,7 +1428,7 @@ function useClientesList() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("clientes").select("id, nombre, correo").order("created_at", { ascending: false });
-      setClientes(data || []);
+      setClientes(filtrarCuentasEstudio(data));
     })();
   }, []);
   return clientes;
@@ -1481,12 +1533,12 @@ function AdminEntregas() {
           <div key={ep.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
             <div className="flex items-center justify-between">
               <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>Episodio {ep.numero} — {ep.titulo}</p>
-              <EtapaPill etapa={ep.etapa} />
+              <EtapaPill etapa={ep.estado} />
             </div>
             <div className="flex items-center gap-2 mt-3">
               <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Etapa:</label>
               <select value={ep.estado} onChange={(e) => setEtapa(ep, e.target.value)} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
-                {ETAPAS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                {PRODUCCION_ETAPAS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
               </select>
               {ep.set && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Set {ep.set.charAt(0) + ep.set.slice(1).toLowerCase()}</span>}
               {ep.fecha_grabacion && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Grabado el {fmtFecha(ep.fecha_grabacion)}</span>}
@@ -1567,7 +1619,7 @@ function AdminProduccion() {
     setEpisodios(ordenados);
     setMissing(ep.missing);
     const map = {};
-    (cl.data || []).forEach((c) => { map[c.id] = c.nombre || c.correo || "Cliente"; });
+    filtrarCuentasEstudio(cl.data).forEach((c) => { map[c.id] = c.nombre || c.correo || "Cliente"; });
     setClientesMap(map);
     setLoading(false);
   }, []);
@@ -1652,6 +1704,8 @@ function AdminPagos() {
   const clientes = useClientesList();
   const [clienteId, setClienteId] = useState("");
   const [pagos, setPagos] = useState([]);
+  const [facturas, setFacturas] = useState([]);
+  const [abonos, setAbonos] = useState([]);
   const [missing, setMissing] = useState(false);
   const [monto, setMonto] = useState("");
   const [concepto, setConcepto] = useState("");
@@ -1661,16 +1715,25 @@ function AdminPagos() {
   const [error, setError] = useState("");
 
   const load = useCallback(async (cid) => {
-    if (!cid) { setPagos([]); return; }
+    if (!cid) { setPagos([]); setFacturas([]); setAbonos([]); return; }
     const res = await safeSelect("pagos", supabase.from("pagos").select("*").eq("cliente_id", cid).order("fecha_vencimiento", { ascending: false }));
+    // Las facturas de Cobranza se reflejan aquí: son la fuente del adeudo
+    // que ve el cliente; los pagos manuales de abajo son registros aparte.
+    const fc = await safeSelect("facturas", supabase.from("facturas").select("*").eq("cliente_id", cid).order("fecha", { ascending: false }));
+    const ab = await safeSelect("abonos", supabase.from("abonos").select("*").order("fecha", { ascending: false }));
     setPagos(res.data);
-    setMissing(res.missing);
+    setFacturas(fc.data);
+    const ids = new Set((fc.data || []).map((f) => f.id));
+    setAbonos((ab.data || []).filter((a) => ids.has(a.factura_id)));
+    setMissing(res.missing || fc.missing || ab.missing);
   }, []);
 
   useEffect(() => { load(clienteId); }, [clienteId, load]);
 
-  const pagado = pagos.filter((p) => p.estado === "pagado").reduce((a, p) => a + Number(p.monto || 0), 0);
-  const pendiente = pagos.filter((p) => p.estado === "pendiente").reduce((a, p) => a + Number(p.monto || 0), 0);
+  const { pendiente, pagado } = saldoCliente(facturas, abonos, pagos);
+  const abonosPorFactura = {};
+  abonos.forEach((a) => { abonosPorFactura[a.factura_id] = (abonosPorFactura[a.factura_id] || 0) + Number(a.monto || 0); });
+  const saldoFactura = (f) => Math.max(0, Number(f.monto || 0) - (abonosPorFactura[f.id] || 0));
 
   const add = async (e) => {
     e.preventDefault();
@@ -1717,6 +1780,26 @@ function AdminPagos() {
               <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: pendiente > 0 ? amber : white, marginTop: 6 }}>{fmtMoney(pendiente)}</p>
             </div>
           </div>
+          {facturas.length > 0 && (
+            <div className="mt-4">
+              <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>FACTURAS DE COBRANZA — ESTO ES LO QUE VE EL CLIENTE</span>
+              <div className="space-y-2 mt-2">
+                {facturas.map((f) => {
+                  const saldo = saldoFactura(f);
+                  const abonado = Math.min(Number(f.monto || 0), abonosPorFactura[f.id] || 0);
+                  return (
+                    <div key={f.id} className="flex items-center justify-between p-3 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+                      <div>
+                        <p style={{ fontFamily: FONT, fontSize: 13.5, color: white }}>{f.concepto}</p>
+                        <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>{f.tipo_cobro || ""}{f.vencimiento ? ` · Vence ${fmtFecha(f.vencimiento)}` : ""} · abonado {fmtMoney(abonado)} de {fmtMoney(f.monto)}</p>
+                      </div>
+                      <b style={{ fontFamily: FONT, fontSize: 14, color: saldo > 0 ? amber : green }}>{saldo > 0 ? `Saldo ${fmtMoney(saldo)}` : "Pagada ✓"}</b>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div className="space-y-2 mt-4">
             {pagos.map((p) => (
               <div key={p.id} className="flex items-center justify-between p-3 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
@@ -1844,7 +1927,7 @@ function AdminNotas() {
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("clientes").select("id, nombre, correo").order("created_at", { ascending: false });
-      setClientes(data || []);
+      setClientes(filtrarCuentasEstudio(data));
     })();
   }, []);
 

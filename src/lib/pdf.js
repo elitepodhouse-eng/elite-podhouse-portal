@@ -219,8 +219,22 @@ function tarjetasPropuesta(q, preciosPaquetes, ext) {
   return t;
 }
 
+// El formulario guarda el interés con su texto completo ("Solo reels",
+// "Renta de estudio por hora"...); el PDF trabaja con claves cortas.
+// Sin este mapa, las tablas de reels/horas nunca se generaban (el PDF
+// pedía q.interes === "reels" pero la fila trae "Solo reels").
+const INTERES_CLAVE = {
+  "Solo grabación": "grabacion",
+  "Solo edición": "edicion",
+  "Ambos": "ambos",
+  "Solo reels": "reels",
+  "Grabación en exterior": "exterior",
+  "Renta de estudio por hora": "horas",
+  "Todos los paquetes": "todos",
+};
+
 export function pdfPropuesta(p, config, preciosPaquetes) {
-  const q = { ...p, precioEdicion: p.precio_edicion };
+  const q = { ...p, precioEdicion: p.precio_edicion, interes: INTERES_CLAVE[p.interes] || p.interes };
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const L = 15, R = 195;
   const precReels = preciosReels(config);
