@@ -113,6 +113,7 @@ export default function AdminCobranza() {
       metodo: a.metodo,
       saldo: saldoDe(f),
       conIva: !!f.con_factura,
+      iva: Number(f.iva || 0),
     });
   };
 

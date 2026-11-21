@@ -299,7 +299,7 @@ export default function AdminFinanzas() {
                       {p.comprobante_url && <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>Comprobante: {p.comprobante_url}</p>}
                     </div>
                     <div className="flex gap-3">
-                      <button onClick={() => pdfReciboColab({ colaborador: selColab.nombre, concepto: p.concepto, monto: Number(p.monto), fecha: p.fecha, metodo: p.metodo })} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Recibo PDF</button>
+                      <button onClick={() => pdfReciboColab({ id: p.id, colaborador: selColab.nombre, concepto: p.concepto, monto: Number(p.monto), fecha: p.fecha, metodo: p.metodo })} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Recibo PDF</button>
                       <button onClick={() => delPagoColab(p.id)} style={{ fontFamily: FONT, fontSize: 12.5, color: red, fontWeight: 600 }}>Eliminar</button>
                     </div>
                   </div>
