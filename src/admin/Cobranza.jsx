@@ -36,6 +36,10 @@ export default function AdminCobranza() {
   const [abArchivo, setAbArchivo] = useState(null);
   const [abSaving, setAbSaving] = useState(false);
 
+  // Reporte semanal/mensual de cobranza.
+  const [repMes, setRepMes] = useState(todayISO().slice(0, 7));
+  const [repSemana, setRepSemana] = useState("mes");
+
   const load = useCallback(async () => {
     const f = await safeSelect("facturas", supabase.from("facturas").select("*").order("created_at", { ascending: false }));
     const a = await safeSelect("abonos", supabase.from("abonos").select("*").order("fecha", { ascending: false }));
@@ -56,6 +60,21 @@ export default function AdminCobranza() {
   const vencidoMonto = vencidas.reduce((a, f) => a + saldoDe(f), 0);
   const mesActual = hoy.slice(0, 7);
   const cobradoMes = abonos.filter((a) => (a.fecha || "").startsWith(mesActual)).reduce((a, x) => a + Number(x.monto || 0), 0);
+
+  // Reporte: facturas y abonos dentro del mes/semana elegidos.
+  const enPeriodo = (fechaStr) => {
+    if (!fechaStr || !fechaStr.startsWith(repMes)) return false;
+    if (repSemana === "mes") return true;
+    const dia = parseInt(fechaStr.slice(8, 10), 10);
+    const sem = Number(repSemana);
+    return dia >= (sem - 1) * 7 + 1 && dia <= sem * 7;
+  };
+  const repFacturas = facturas.filter((f) => enPeriodo(f.fecha));
+  const repFacturado = repFacturas.reduce((a, f) => a + Number(f.monto || 0), 0);
+  const repCobrado = abonos.filter((a) => enPeriodo(a.fecha)).reduce((a, x) => a + Number(x.monto || 0), 0);
+  const repPendiente = repFacturas.reduce((a, f) => a + Math.max(0, saldoDe(f)), 0);
+  const repVencido = repFacturas.filter((f) => saldoDe(f) > 0 && f.vencimiento && f.vencimiento < hoy).reduce((a, f) => a + saldoDe(f), 0);
+  const telefonoDe = (id) => clientes.find((c) => c.id === id)?.telefono || "";
 
   const crearFactura = async (e) => {
     e.preventDefault();
@@ -234,6 +253,49 @@ export default function AdminCobranza() {
         <ErrorBanner message={error} />
         <div className="mt-3"><PillButton type="submit" disabled={saving}>{saving ? "Guardando…" : "Guardar factura"}</PillButton></div>
       </form>
+
+      <div className="rounded-2xl p-5 mt-6" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>REPORTE DE COBRANZA</span>
+        <div className="flex gap-2 mt-3 flex-wrap">
+          <input type="month" value={repMes} onChange={(e) => setRepMes(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={inputStyle} />
+          <select value={repSemana} onChange={(e) => setRepSemana(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={inputStyle}>
+            <option value="mes">Todo el mes</option>
+            <option value="1">Semana 1 (días 1–7)</option>
+            <option value="2">Semana 2 (días 8–14)</option>
+            <option value="3">Semana 3 (días 15–21)</option>
+            <option value="4">Semana 4 (días 22–28)</option>
+            <option value="5">Semana 5 (días 29–31)</option>
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-3 mt-4">
+          <Kpi label="FACTURADO EN EL PERIODO" value={fmtMoney(repFacturado)} />
+          <Kpi label="COBRADO EN EL PERIODO" value={fmtMoney(repCobrado)} color={green} />
+          <Kpi label="PENDIENTE (DE ESAS FACTURAS)" value={fmtMoney(repPendiente)} color={repPendiente > 0 ? amber : white} />
+          <Kpi label="VENCIDO" value={fmtMoney(repVencido)} color={repVencido > 0 ? red : white} />
+        </div>
+        <div className="space-y-2 mt-4">
+          {repFacturas.map((f) => {
+            const saldo = saldoDe(f);
+            const vencida = saldo > 0 && f.vencimiento && f.vencimiento < hoy;
+            const abonado = abonosDe(f.id).reduce((a, x) => a + Number(x.monto || 0), 0);
+            const tel = telefonoDe(f.cliente_id);
+            const wa = saldo > 0 && tel ? waUrl(tel, `Hola ${nombreCliente(f.cliente_id)}, te escribe Élite Podhouse. Te recordamos un saldo pendiente de ${fmtMoney(saldo)} por ${f.concepto}${f.vencimiento ? ` (vencía el ${fmtFecha(f.vencimiento)})` : ""}. ¿Nos confirmas tu pago?`) : "";
+            return (
+              <div key={f.id} className="flex items-center justify-between p-3 rounded-xl" style={{ background: "#0B1338", border: `1px solid ${cardAlt}` }}>
+                <div>
+                  <p style={{ fontFamily: FONT, fontSize: 13, color: white }}>{nombreCliente(f.cliente_id)} — {f.concepto}</p>
+                  <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 2 }}>{f.fecha ? fmtFecha(f.fecha) : ""} · {fmtMoney(f.monto)} · abonado {fmtMoney(abonado)}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <b style={{ fontFamily: FONT, fontSize: 13, color: saldo > 0 ? (vencida ? red : amber) : green }}>{saldo > 0 ? `Saldo ${fmtMoney(saldo)}` : "Pagada ✓"}</b>
+                  {wa && <a href={wa} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontSize: 12, color: green, fontWeight: 600 }}>Recordar por WhatsApp</a>}
+                </div>
+              </div>
+            );
+          })}
+          {repFacturas.length === 0 && <EmptyNote>Sin facturas en este periodo.</EmptyNote>}
+        </div>
+      </div>
     </div>
   );
 }

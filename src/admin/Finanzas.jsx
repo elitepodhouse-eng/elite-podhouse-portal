@@ -49,6 +49,24 @@ export default function AdminFinanzas() {
   const meta = Number(config?.metaMensual || 0);
   const avanceMeta = meta > 0 ? Math.min(100, Math.round((ingresos / meta) * 100)) : 0;
 
+  // Gráfica mes a mes (últimos 6 meses): ingresos en verde, egresos en rojo.
+  const MESES_NOMBRES = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const ultimosMeses = (() => {
+    const lista = [];
+    const d = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const m = new Date(d.getFullYear(), d.getMonth() - i, 1);
+      const clave = `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, "0")}`;
+      const ing = movimientos.filter((x) => (x.fecha || "").startsWith(clave) && x.tipo === "ingreso").reduce((t, x) => t + Number(x.monto || 0), 0)
+        + abonos.filter((x) => (x.fecha || "").startsWith(clave)).reduce((t, x) => t + Number(x.monto || 0), 0);
+      const egr = movimientos.filter((x) => (x.fecha || "").startsWith(clave) && x.tipo === "egreso").reduce((t, x) => t + Number(x.monto || 0), 0)
+        + pagosColab.filter((x) => (x.fecha || "").startsWith(clave)).reduce((t, x) => t + Number(x.monto || 0), 0);
+      lista.push({ clave, etiqueta: MESES_NOMBRES[m.getMonth()], ing: r2(ing), egr: r2(egr) });
+    }
+    return lista;
+  })();
+  const maxGrafica = Math.max(1, ...ultimosMeses.map((m) => Math.max(m.ing, m.egr)));
+
   // --- Forms ---
   const [mvTipo, setMvTipo] = useState("egreso");
   const [mvFecha, setMvFecha] = useState(todayISO());
@@ -175,6 +193,23 @@ export default function AdminFinanzas() {
             ) : (
               <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 8 }}>Sin meta mensual. Se define en Ajustes (clave metaMensual).</p>
             )}
+          </div>
+          <div className="rounded-2xl p-5 mt-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>ÚLTIMOS 6 MESES</span>
+            <div className="flex items-end gap-3 mt-4" style={{ height: 120 }}>
+              {ultimosMeses.map((m) => (
+                <div key={m.clave} className="flex-1 flex flex-col items-center justify-end" style={{ height: "100%" }}>
+                  <div className="flex items-end gap-1" style={{ height: 96 }}>
+                    <div title={`Ingresos ${fmtMoney(m.ing)}`} style={{ width: 12, height: `${Math.max(2, (m.ing / maxGrafica) * 96)}px`, background: green, borderRadius: 3 }} />
+                    <div title={`Egresos ${fmtMoney(m.egr)}`} style={{ width: 12, height: `${Math.max(2, (m.egr / maxGrafica) * 96)}px`, background: red, borderRadius: 3 }} />
+                  </div>
+                  <span style={{ fontFamily: FONT, fontSize: 11, color: gray, marginTop: 6 }}>{m.etiqueta}</span>
+                </div>
+              ))}
+            </div>
+            <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 8 }}>
+              <span style={{ color: green }}>■</span> Ingresos &nbsp; <span style={{ color: red }}>■</span> Egresos
+            </p>
           </div>
           <div className="rounded-2xl p-5 mt-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
             <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>CÓMO SE CUENTA</span>

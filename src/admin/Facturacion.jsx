@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, Kpi, inputStyle, labelStyle, card, cardAlt, white, gray, blueLight, green, amber, red, FONT } from "../lib/ui";
-import { safeSelect, fmtMoney, fmtFecha, todayISO, r2 } from "../lib/ops";
+import { safeSelect, safeLoadClientes, fmtMoney, fmtFecha, todayISO, r2 } from "../lib/ops";
 
 // Tramos RESICO (mapa §2.8): tasa ISR según ingresos del mes.
 const TRAMOS = [
@@ -16,6 +16,7 @@ export default function AdminFacturacion() {
   const [fiscales, setFiscales] = useState([]);
   const [meses, setMeses] = useState([]);
   const [cobranza, setCobranza] = useState([]);
+  const [clientes, setClientes] = useState([]);
   const [missing, setMissing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mesSel, setMesSel] = useState(todayISO().slice(0, 7));
@@ -44,12 +45,14 @@ export default function AdminFacturacion() {
   const load = useCallback(async () => {
     const f = await safeSelect("facturas_fiscales", supabase.from("facturas_fiscales").select("*").order("fecha", { ascending: false }));
     const m = await safeSelect("meses_fiscales", supabase.from("meses_fiscales").select("*").order("mes", { ascending: false }));
-    const c = await safeSelect("facturas", supabase.from("facturas").select("id, concepto, cliente_id"));
+    const c = await safeSelect("facturas", supabase.from("facturas").select("id, concepto, cliente_id, monto"));
     setFiscales(f.data); setMeses(m.data); setCobranza(c.data);
     setMissing(f.missing || m.missing);
     setLoading(false);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); safeLoadClientes().then(setClientes); }, [load]);
+
+  const nombreCliente = (id) => clientes.find((c) => c.id === id)?.nombre || "Cliente";
 
   const failMsg = "Falta aplicar la migración supabase/migrations/002_finanzas_facturacion.sql en Supabase.";
 
@@ -217,7 +220,7 @@ export default function AdminFacturacion() {
             <label style={labelStyle}>LIGADA A FACTURA DE COBRANZA (OPCIONAL)</label>
             <select value={cobranzaId} onChange={(e) => setCobranzaId(e.target.value)} className="w-full rounded-xl px-3 py-2.5" style={inputStyle}>
               <option value="">Sin liga</option>
-              {cobranza.map((c) => <option key={c.id} value={c.id}>{c.concepto}</option>)}
+              {cobranza.map((c) => <option key={c.id} value={c.id}>{nombreCliente(c.cliente_id)} — {c.concepto} — {fmtMoney(c.monto)}</option>)}
             </select>
           </div>
         )}

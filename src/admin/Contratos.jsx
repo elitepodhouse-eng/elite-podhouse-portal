@@ -45,6 +45,7 @@ export default function AdminContratos() {
   const [anticipo, setAnticipo] = useState("");
   const [tipoServicio, setTipoServicio] = useState("grabacion_edicion");
   const [revisiones, setRevisiones] = useState(1);
+  const [portafolio, setPortafolio] = useState("si");
   const [jurisdiccion, setJurisdiccion] = useState("Para la interpretación y cumplimiento de este contrato, las partes se someten a las leyes de México y a los tribunales de Hermosillo, Sonora.");
   const [prestador, setPrestador] = useState("Tania Elizabeth Mino Torres");
 
@@ -83,7 +84,7 @@ export default function AdminContratos() {
       cliente: nombre.trim(), rfc, representante, domicilio, telefono, email,
       proyecto, servicios, subtotal: Number(subtotal) || 0, iva: Number(iva) || 0,
       total: Number(total) || 0, anticipo: Number(anticipo) || 0,
-      tipoServicio, revisiones: Number(revisiones) || 1, jurisdiccion, prestador,
+      tipoServicio, revisiones: Number(revisiones) || 1, portafolio, jurisdiccion, prestador,
       cancelacion: "Si el cliente cancela, el anticipo no es reembolsable.",
     };
     const { error } = await supabase.from("contratos").insert({
@@ -204,6 +205,13 @@ export default function AdminContratos() {
             <label style={labelStyle}>REVISIONES INCLUIDAS</label>
             <input type="number" min="0" value={revisiones} onChange={(e) => setRevisiones(Number(e.target.value))} className="w-full rounded-xl px-3 py-2.5 outline-none" style={inputStyle} />
           </div>
+        </div>
+        <div className="mt-2">
+          <label style={labelStyle}>PORTAFOLIO (¿EL CLIENTE AUTORIZA USAR SU MATERIAL COMO PORTAFOLIO?)</label>
+          <select value={portafolio} onChange={(e) => setPortafolio(e.target.value)} className="w-full rounded-xl px-3 py-2.5" style={inputStyle}>
+            <option value="si">Sí, autoriza</option>
+            <option value="no">No autoriza</option>
+          </select>
         </div>
         <div className="mt-2">
           <label style={labelStyle}>JURISDICCIÓN</label>
