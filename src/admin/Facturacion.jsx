@@ -93,11 +93,13 @@ export default function AdminFacturacion() {
   };
 
   const marcarCobrada = async (f) => {
-    await supabase.from("facturas_fiscales").update({ cobrada: !f.cobrada, fecha_cobro: !f.cobrada ? todayISO() : null }).eq("id", f.id);
+    const { error } = await supabase.from("facturas_fiscales").update({ cobrada: !f.cobrada, fecha_cobro: !f.cobrada ? todayISO() : null }).eq("id", f.id);
+    if (error) { setError(error.message); return; }
     load();
   };
   const cancelar = async (f) => {
-    await supabase.from("facturas_fiscales").update({ estado: f.estado === "Cancelada" ? "Vigente" : "Cancelada" }).eq("id", f.id);
+    const { error } = await supabase.from("facturas_fiscales").update({ estado: f.estado === "Cancelada" ? "Vigente" : "Cancelada" }).eq("id", f.id);
+    if (error) { setError(error.message); return; }
     load();
   };
 

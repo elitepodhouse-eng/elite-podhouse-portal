@@ -1221,6 +1221,7 @@ async function invocarCreateUser(body) {
 function AdminClientes() {
   const [clientes, setClientes] = useState([]);
   const [detalleId, setDetalleId] = useState(null);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   // Nuevo usuario (cuenta nueva con usuario y contraseña).
@@ -1249,7 +1250,9 @@ function AdminClientes() {
 
   const update = async (id, patch) => {
     setSavingId(id);
-    await supabase.from("clientes").update(patch).eq("id", id);
+    setError("");
+    const { error } = await supabase.from("clientes").update(patch).eq("id", id);
+    if (error) { setError(error.message); setSavingId(null); return; }
     setClientes((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
     setSavingId(null);
   };
@@ -1330,6 +1333,7 @@ function AdminClientes() {
           <PillButton type="submit" disabled={nuSaving}>{nuSaving ? <Loader2 size={15} className="animate-spin" /> : "Crear usuario"}</PillButton>
         </div>
       </form>
+      <ErrorBanner message={error} />
       <div className="mt-6 space-y-3">
         {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
         {clientes.map((c) => (
@@ -1746,12 +1750,14 @@ function AdminEntregas() {
 
   const setEtapa = async (ep, estado) => {
     const { error } = await supabase.from("episodios").update({ estado }).eq("id", ep.id);
-    if (!error) load(clienteId);
+    if (error) { setError(error.message); return; }
+    load(clienteId);
   };
 
   const setResponsableEp = async (ep, nombre) => {
     const { error } = await supabase.from("episodios").update({ responsable: nombre || null }).eq("id", ep.id);
-    if (!error) load(clienteId);
+    if (error) { setError(error.message); return; }
+    load(clienteId);
   };
 
   const add = async (e) => {
@@ -1868,6 +1874,7 @@ function AdminProduccion() {
   const [filtro, setFiltro] = useState("todos");
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
+  const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1895,12 +1902,14 @@ function AdminProduccion() {
 
   const setEtapa = async (ep, estado) => {
     const { error } = await supabase.from("episodios").update({ estado }).eq("id", ep.id);
-    if (!error) load();
+    if (error) { setError(error.message); return; }
+    load();
   };
 
   const setResponsableEp = async (ep, nombre) => {
     const { error } = await supabase.from("episodios").update({ responsable: nombre || null }).eq("id", ep.id);
-    if (!error) load();
+    if (error) { setError(error.message); return; }
+    load();
   };
 
   const conteos = { todos: episodios.length };
@@ -1915,6 +1924,7 @@ function AdminProduccion() {
       <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6 }}>
         Todos los episodios en producción, por etapa y con su responsable.
       </p>
+      {error && <p style={{ fontFamily: FONT, fontSize: 13, color: red, marginTop: 12 }}>{error}</p>}
       {missing && <div className="mt-4"><MissingTablesBanner /></div>}
       <div className="flex gap-2 mt-6 flex-wrap">
         {filtros.map((f) => (
@@ -2020,7 +2030,8 @@ function AdminPagos() {
   };
 
   const remove = async (id) => {
-    await supabase.from("pagos").delete().eq("id", id);
+    const { error } = await supabase.from("pagos").delete().eq("id", id);
+    if (error) { setError(error.message); return; }
     load(clienteId);
   };
 
@@ -2135,12 +2146,14 @@ function AdminTips() {
   };
 
   const toggle = async (it) => {
-    await supabase.from("contenidos").update({ publicado: !it.publicado }).eq("id", it.id);
+    const { error } = await supabase.from("contenidos").update({ publicado: !it.publicado }).eq("id", it.id);
+    if (error) { setError(error.message); return; }
     load();
   };
 
   const remove = async (id) => {
-    await supabase.from("contenidos").delete().eq("id", id);
+    const { error } = await supabase.from("contenidos").delete().eq("id", id);
+    if (error) { setError(error.message); return; }
     load();
   };
 

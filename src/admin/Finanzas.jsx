@@ -147,9 +147,9 @@ export default function AdminFinanzas() {
     else { setPcConcepto(""); setPcMonto(""); setPcNota(""); setPcComprobante(""); setPcArchivo(null); setOk("Pago registrado."); load(); }
     setPcSaving(false);
   };
-  const delMov = async (id) => { await supabase.from("movimientos").delete().eq("id", id); load(); };
-  const delGasto = async (id) => { await supabase.from("gastos_fijos").delete().eq("id", id); load(); };
-  const delPagoColab = async (id) => { await supabase.from("pagos_colaboradores").delete().eq("id", id); load(); };
+  const delMov = async (id) => { const { error } = await supabase.from("movimientos").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
+  const delGasto = async (id) => { const { error } = await supabase.from("gastos_fijos").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
+  const delPagoColab = async (id) => { const { error } = await supabase.from("pagos_colaboradores").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
 
   const tabs = [
     { id: "resumen", label: "Resumen" },

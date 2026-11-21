@@ -127,8 +127,10 @@ export default function AdminCobranza() {
   };
 
   const eliminarFactura = async (f) => {
-    await supabase.from("abonos").delete().eq("factura_id", f.id);
-    await supabase.from("facturas").delete().eq("id", f.id);
+    const { error: e1 } = await supabase.from("abonos").delete().eq("factura_id", f.id);
+    if (e1) { setError(e1.message); return; }
+    const { error: e2 } = await supabase.from("facturas").delete().eq("id", f.id);
+    if (e2) { setError(e2.message); return; }
     setSel(null);
     load();
   };

@@ -108,10 +108,11 @@ export default function AdminContratos() {
   };
 
   const cambiarEstado = async (c, nuevo) => {
-    await supabase.from("contratos").update({ estado: nuevo }).eq("id", c.id);
+    const { error } = await supabase.from("contratos").update({ estado: nuevo }).eq("id", c.id);
+    if (error) { setError(error.message); return; }
     load();
   };
-  const eliminar = async (id) => { await supabase.from("contratos").delete().eq("id", id); load(); };
+  const eliminar = async (id) => { const { error } = await supabase.from("contratos").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
 
   const filtrados = filtro === "Todos" ? items : items.filter((c) => c.estado === filtro);
   const anticipoDefault = Number(config?.anticipo || 500);

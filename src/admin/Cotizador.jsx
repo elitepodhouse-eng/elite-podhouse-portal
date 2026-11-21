@@ -104,10 +104,11 @@ export default function AdminCotizador() {
   };
 
   const cambiarEstado = async (c, nuevo) => {
-    await supabase.from("cotizaciones").update({ estado: nuevo }).eq("id", c.id);
+    const { error } = await supabase.from("cotizaciones").update({ estado: nuevo }).eq("id", c.id);
+    if (error) { setError(error.message); return; }
     load();
   };
-  const eliminar = async (id) => { await supabase.from("cotizaciones").delete().eq("id", id); load(); };
+  const eliminar = async (id) => { const { error } = await supabase.from("cotizaciones").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
 
   const filtradas = filtro === "Todos" ? items : items.filter((c) => c.estado === filtro);
 

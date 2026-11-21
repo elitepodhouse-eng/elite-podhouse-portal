@@ -85,7 +85,8 @@ export default function AdminPropuestas() {
   };
 
   const eliminar = async (id) => {
-    await supabase.from("propuestas").delete().eq("id", id);
+    const { error } = await supabase.from("propuestas").delete().eq("id", id);
+    if (error) { setError(error.message); return; }
     setSel(null);
     load();
   };
