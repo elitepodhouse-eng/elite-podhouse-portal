@@ -45,6 +45,25 @@ export function filtrarClientes(rows) {
   return (rows || []).filter((c) => !esCuentaEstudio(c));
 }
 
+// ---------- Saldo único del cliente ----------
+// Las facturas de Cobranza son la fuente de verdad del adeudo
+// (saldo = monto − abonos); los pagos manuales de la tabla `pagos` se
+// suman aparte, sin duplicar. No escribe nada: solo deriva en lectura.
+export function saldoCliente(facturas, abonos, pagos) {
+  const abonosPorFactura = {};
+  (abonos || []).forEach((a) => { abonosPorFactura[a.factura_id] = (abonosPorFactura[a.factura_id] || 0) + Number(a.monto || 0); });
+  let pendienteF = 0, pagadoF = 0;
+  (facturas || []).forEach((f) => {
+    const m = Number(f.monto || 0);
+    const ab = Math.min(m, abonosPorFactura[f.id] || 0);
+    pagadoF += ab;
+    pendienteF += Math.max(0, m - ab);
+  });
+  const pagadoM = (pagos || []).filter((p) => p.estado === "pagado").reduce((a, p) => a + Number(p.monto || 0), 0);
+  const pendienteM = (pagos || []).filter((p) => p.estado === "pendiente").reduce((a, p) => a + Number(p.monto || 0), 0);
+  return { pendiente: pendienteF + pendienteM, pagado: pagadoF + pagadoM, pendienteFacturas: pendienteF, pagadoFacturas: pagadoF };
+}
+
 // ---------- WhatsApp ----------
 // Teléfono mexicano de 10 dígitos -> prefijo 52, como en Élite OS.
 export function waPhone(tel) {

@@ -5,6 +5,7 @@ import {
   Wallet, Package, Sparkles, Newspaper, Banknote, Trash2
 } from "lucide-react";
 import { supabase, isAdminEmail } from "./supabaseClient";
+import { saldoCliente } from "./lib/ops";
 import AdminPropuestas from "./admin/Propuestas";
 import AdminCotizador from "./admin/Cotizador";
 import AdminContratos from "./admin/Contratos";
@@ -13,6 +14,7 @@ import AdminHoy from "./admin/Hoy";
 import AdminFinanzas from "./admin/Finanzas";
 import AdminFacturacion from "./admin/Facturacion";
 import AdminAjustes from "./admin/Ajustes";
+import ClienteDetalle from "./admin/ClienteDetalle";
 
 // Identidad Élite Podhouse (la misma de la vista previa aprobada por Tania)
 const navy = "#0B1338";
@@ -126,24 +128,6 @@ async function safeSelect(table, query) {
 // de todas las listas y desplegables de clientes. Sus filas siguen en la
 // base; solo no se muestran como clientes.
 const filtrarCuentasEstudio = (rows) => (rows || []).filter((c) => !isAdminEmail(c?.correo));
-
-// Saldo único del cliente: las facturas de Cobranza son la fuente de verdad
-// (saldo = monto − abonos); los pagos manuales de la tabla `pagos` se suman
-// aparte, sin duplicar. No escribe nada: solo deriva en lectura.
-function saldoCliente(facturas, abonos, pagos) {
-  const abonosPorFactura = {};
-  (abonos || []).forEach((a) => { abonosPorFactura[a.factura_id] = (abonosPorFactura[a.factura_id] || 0) + Number(a.monto || 0); });
-  let pendienteF = 0, pagadoF = 0;
-  (facturas || []).forEach((f) => {
-    const m = Number(f.monto || 0);
-    const ab = Math.min(m, abonosPorFactura[f.id] || 0);
-    pagadoF += ab;
-    pendienteF += Math.max(0, m - ab);
-  });
-  const pagadoM = (pagos || []).filter((p) => p.estado === "pagado").reduce((a, p) => a + Number(p.monto || 0), 0);
-  const pendienteM = (pagos || []).filter((p) => p.estado === "pendiente").reduce((a, p) => a + Number(p.monto || 0), 0);
-  return { pendiente: pendienteF + pendienteM, pagado: pagadoF + pagadoM, pendienteFacturas: pendienteF, pagadoFacturas: pagadoF };
-}
 
 // ---------- UI atoms ----------
 function Eyebrow({ children }) {
@@ -1228,6 +1212,7 @@ async function invocarCreateUser(body) {
 
 function AdminClientes() {
   const [clientes, setClientes] = useState([]);
+  const [detalleId, setDetalleId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   // Nuevo usuario (cuenta nueva con usuario y contraseña).
@@ -1311,6 +1296,10 @@ function AdminClientes() {
 
   return (
     <div>
+      {detalleId ? (
+        <ClienteDetalle clienteId={detalleId} onBack={() => { setDetalleId(null); load(); }} />
+      ) : (
+      <>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
       <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Clientes</h1>
       <form onSubmit={crearUsuario} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
@@ -1339,7 +1328,7 @@ function AdminClientes() {
           <div key={c.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
             <div className="flex items-center justify-between mb-3">
               <div>
-                <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{c.nombre || c.correo}</p>
+                <button onClick={() => setDetalleId(c.id)} className="text-left" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white, background: "none", border: "none", padding: 0, cursor: "pointer" }}>{c.nombre || c.correo} →</button>
                 <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>{c.correo}</p>
                 {c.usuario && <p style={{ fontFamily: FONT, fontSize: 11.5, color: blueLight, marginTop: 2 }}>Usuario: {c.usuario}</p>}
               </div>
@@ -1386,6 +1375,8 @@ function AdminClientes() {
           </div>
         ))}
       </div>
+      </>
+      )}
     </div>
   );
 }
