@@ -15,6 +15,7 @@ import AdminFinanzas from "./admin/Finanzas";
 import AdminFacturacion from "./admin/Facturacion";
 import AdminAjustes from "./admin/Ajustes";
 import ClienteDetalle from "./admin/ClienteDetalle";
+import EpisodioDetalle from "./admin/EpisodioDetalle";
 
 // Identidad Élite Podhouse (la misma de la vista previa aprobada por Tania)
 const navy = "#0B1338";
@@ -759,6 +760,12 @@ function DeliveriesView({ episodios, loading, missing, onChanged }) {
               {ep.set ? ` · Set ${ep.set.charAt(0) + ep.set.slice(1).toLowerCase()}` : ""}
               {ep.responsable ? ` · Responsable: ${ep.responsable}` : ""}
             </p>
+            {(ep.video_url || ep.audio_url) && (
+              <div className="flex gap-4 mt-3">
+                {ep.video_url && <a href={ep.video_url} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: blueLight }}>▶ Ver video</a>}
+                {ep.audio_url && <a href={ep.audio_url} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: blueLight }}>♪ Escuchar audio</a>}
+              </div>
+            )}
             {ep.estado === "en_revision" && (
               <div className="flex gap-2 mt-4">
                 <PillButton disabled={busyId === ep.id} onClick={() => updateEtapa(ep, "publicado")}>
@@ -1418,7 +1425,7 @@ function useClientesList() {
   const [clientes, setClientes] = useState([]);
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("clientes").select("id, nombre, correo").order("created_at", { ascending: false });
+      const { data } = await supabase.from("clientes").select("id, nombre, correo, telefono").order("created_at", { ascending: false });
       setClientes(filtrarCuentasEstudio(data));
     })();
   }, []);
@@ -1544,6 +1551,12 @@ function AdminEntregas() {
                 {ep.responsable && !colabs.some((c) => c.nombre === ep.responsable) && <option value={ep.responsable}>{ep.responsable}</option>}
               </select>
             </div>
+            <EpisodioDetalle
+              ep={ep}
+              clienteNombre={(clientes.find((c) => c.id === clienteId) || {}).nombre}
+              telefono={(clientes.find((c) => c.id === clienteId) || {}).telefono}
+              onChanged={() => load(clienteId)}
+            />
           </div>
         ))}
       </div>
@@ -1591,6 +1604,7 @@ function AdminProduccion() {
   const colabs = useColaboradores();
   const [episodios, setEpisodios] = useState([]);
   const [clientesMap, setClientesMap] = useState({});
+  const [telefonosMap, setTelefonosMap] = useState({});
   const [filtro, setFiltro] = useState("todos");
   const [loading, setLoading] = useState(true);
   const [missing, setMissing] = useState(false);
@@ -1599,7 +1613,7 @@ function AdminProduccion() {
     setLoading(true);
     const [ep, cl] = await Promise.all([
       safeSelect("episodios", supabase.from("episodios").select("*")),
-      supabase.from("clientes").select("id, nombre, correo"),
+      supabase.from("clientes").select("id, nombre, correo, telefono"),
     ]);
     const ordenados = [...(ep.data || [])].sort((a, b) => {
       if (!a.fecha_grabacion && !b.fecha_grabacion) return 0;
@@ -1610,8 +1624,10 @@ function AdminProduccion() {
     setEpisodios(ordenados);
     setMissing(ep.missing);
     const map = {};
-    filtrarCuentasEstudio(cl.data).forEach((c) => { map[c.id] = c.nombre || c.correo || "Cliente"; });
+    const telMap = {};
+    filtrarCuentasEstudio(cl.data).forEach((c) => { map[c.id] = c.nombre || c.correo || "Cliente"; telMap[c.id] = c.telefono || ""; });
     setClientesMap(map);
+    setTelefonosMap(telMap);
     setLoading(false);
   }, []);
 
@@ -1684,6 +1700,7 @@ function AdminProduccion() {
                 {ep.responsable && !colabs.some((c) => c.nombre === ep.responsable) && <option value={ep.responsable}>{ep.responsable}</option>}
               </select>
             </div>
+            <EpisodioDetalle ep={ep} clienteNombre={clientesMap[ep.cliente_id]} telefono={telefonosMap[ep.cliente_id]} onChanged={load} />
           </div>
         ))}
       </div>
