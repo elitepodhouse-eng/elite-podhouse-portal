@@ -5,7 +5,7 @@ import {
   Wallet, Package, Sparkles, Newspaper, Banknote, Trash2
 } from "lucide-react";
 import { supabase, isAdminEmail } from "./supabaseClient";
-import { saldoCliente } from "./lib/ops";
+import { saldoCliente, waUrl } from "./lib/ops";
 import AdminPropuestas from "./admin/Propuestas";
 import AdminCotizador from "./admin/Cotizador";
 import AdminContratos from "./admin/Contratos";
@@ -499,7 +499,7 @@ function ClientDashboard({ perfil, sesiones, episodios, pagos, facturas, abonos,
   const todayISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const sesionesMes = sesiones.filter((s) => s.fecha && s.fecha.startsWith(monthPrefix));
   const proximas = sesiones
-    .filter((s) => s.fecha && s.fecha >= todayISO)
+    .filter((s) => s.fecha && s.fecha >= todayISO && s.estado !== "Cancelada")
     .sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
   const proxima = proximas[0];
   const enCurso = [...episodios]
@@ -940,7 +940,7 @@ function BookSession({ userId, perfil, onBooked }) {
   // también los eventos del calendario del estudio.
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("sesiones").select("fecha, hora").gte("fecha", fechaISO(1)).lte("fecha", fechaISO(daysInMonth));
+      const { data } = await supabase.from("sesiones").select("fecha, hora").gte("fecha", fechaISO(1)).lte("fecha", fechaISO(daysInMonth)).neq("estado", "Cancelada");
       const map = {};
       (data || []).forEach((s) => {
         if (!map[s.fecha]) map[s.fecha] = [];
@@ -977,7 +977,8 @@ function BookSession({ userId, perfil, onBooked }) {
     try {
       const fecha = fechaISO(selectedDay);
       // Revisión final: si otro cliente apartó ese horario mientras elegías, no se duplica.
-      const { data: clash } = await supabase.from("sesiones").select("id").eq("fecha", fecha).eq("hora", selectedSlot).limit(1);
+      // Las sesiones canceladas no bloquean: al cancelar se libera el horario.
+      const { data: clash } = await supabase.from("sesiones").select("id").eq("fecha", fecha).eq("hora", selectedSlot).neq("estado", "Cancelada").limit(1);
       if (clash && clash.length > 0) throw new Error("Ese horario ya se apartó. Elige otro, por favor.");
       const { error } = await supabase.from("sesiones").insert({
         cliente_id: userId, fecha, hora: selectedSlot, titulo: `Sesión — ${perfil?.show_nombre || "Grabación"}`,
@@ -1388,34 +1389,293 @@ function AdminClientes() {
   );
 }
 
+// Agenda del admin (auditoría Élite OS, tanda 4): crear reservas con
+// anticipo/paquete/set, cancelar y reprogramar, y registro de visitas.
+// Las columnas extra de sesiones y la tabla visitas llegan con la
+// migración 004 (supabase/migrations/004_agenda_y_visitas.sql); el código
+// detecta si existen y funciona sin ellas (sin anticipo/paquete/set/nota).
 function AdminSesiones() {
+  const clientes = useClientesList();
   const [sesiones, setSesiones] = useState([]);
+  const [visitas, setVisitas] = useState([]);
+  const [visitasMissing, setVisitasMissing] = useState(false);
+  const [tieneExtras, setTieneExtras] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+  // Nueva reserva.
+  const [fCliente, setFCliente] = useState("");
+  const [fFecha, setFFecha] = useState("");
+  const [fHora, setFHora] = useState("");
+  const [fPaquete, setFPaquete] = useState("");
+  const [fSet, setFSet] = useState("");
+  const [fAnticipo, setFAnticipo] = useState("");
+  const [fTelefono, setFTelefono] = useState("");
+  const [fNota, setFNota] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [gcalAviso, setGcalAviso] = useState(false);
+  // Reprogramar.
+  const [reprogId, setReprogId] = useState(null);
+  const [reprogFecha, setReprogFecha] = useState("");
+  const [reprogHora, setReprogHora] = useState("");
+  // Nueva visita.
+  const [vNombre, setVNombre] = useState("");
+  const [vTelefono, setVTelefono] = useState("");
+  const [vCliente, setVCliente] = useState("");
+  const [vFecha, setVFecha] = useState("");
+  const [vHora, setVHora] = useState("");
+  const [vDuracion, setVDuracion] = useState("30");
+  const [vNotas, setVNotas] = useState("");
+  const [vSaving, setVSaving] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase.from("sesiones").select("*, clientes(nombre, correo)").order("fecha", { ascending: false });
-      setSesiones(data || []);
-      setLoading(false);
-    })();
+  const now = new Date();
+  const hoyISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { data } = await supabase.from("sesiones").select("*, clientes(nombre, correo)").order("fecha", { ascending: false });
+    setSesiones(data || []);
+    const probe = await supabase.from("sesiones").select("paquete").limit(1);
+    setTieneExtras(!probe.error);
+    const v = await safeSelect("visitas", supabase.from("visitas").select("*").order("fecha", { ascending: false }));
+    setVisitas(v.data);
+    setVisitasMissing(v.missing);
+    setLoading(false);
   }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const slotsPara = (fechaStr) => {
+    if (!fechaStr) return SLOTS;
+    const wd = new Date(`${fechaStr}T12:00:00`).getDay();
+    if (wd === 0) return [];
+    if (wd === 6) return SLOTS_SABADO;
+    return SLOTS;
+  };
+
+  const crear = async (e) => {
+    e.preventDefault();
+    setError(""); setOkMsg(""); setGcalAviso(false);
+    if (!fCliente || !fFecha || !fHora) { setError("Elige cliente, fecha y hora."); return; }
+    const { data: clash } = await supabase.from("sesiones").select("id").eq("fecha", fFecha).eq("hora", fHora).neq("estado", "Cancelada").limit(1);
+    if (clash && clash.length > 0) { setError("Ese horario ya está ocupado. Elige otro."); return; }
+    setSaving(true);
+    const cliente = clientes.find((c) => c.id === fCliente);
+    const titulo = `Sesión — ${cliente?.nombre || "Grabación"}`;
+    const base = { cliente_id: fCliente, fecha: fFecha, hora: fHora, titulo, estado: "Agendada" };
+    const extra = tieneExtras
+      ? { paquete: fPaquete || null, set: fSet || null, anticipo: fAnticipo ? Number(fAnticipo) : null, telefono: fTelefono || cliente?.telefono || null, nota: fNota || null }
+      : {};
+    const { error: err } = await supabase.from("sesiones").insert({ ...base, ...extra });
+    if (err) { setError(err.message); setSaving(false); return; }
+    // Google Calendar: mejor esfuerzo, como en la reserva del cliente.
+    try {
+      const { error: gcalError } = await supabase.functions.invoke("google-calendar", {
+        body: { action: "create", fecha: fFecha, hora: fHora, titulo, cliente_nombre: cliente?.nombre, cliente_correo: cliente?.correo },
+      });
+      if (gcalError) setGcalAviso(true);
+    } catch { setGcalAviso(true); }
+    setFCliente(""); setFFecha(""); setFHora(""); setFPaquete(""); setFSet(""); setFAnticipo(""); setFTelefono(""); setFNota("");
+    setOkMsg("Sesión creada.");
+    setSaving(false);
+    load();
+  };
+
+  const cancelar = async (s) => {
+    setError(""); setOkMsg("");
+    // La restricción única (fecha, hora) seguiría bloqueando el horario
+    // aunque la sesión esté cancelada: se mueve la hora a 00:00 y se guarda
+    // la hora original en la nota, así el horario queda libre de verdad.
+    const patch = { estado: "Cancelada" };
+    if (tieneExtras) {
+      patch.hora = "00:00";
+      patch.nota = `${s.nota ? s.nota + " · " : ""}Cancelada (horario original ${s.hora})`;
+    }
+    const { error: err } = await supabase.from("sesiones").update(patch).eq("id", s.id);
+    if (err) setError(err.message);
+    else { setOkMsg("Sesión cancelada; el horario quedó libre."); load(); }
+  };
+
+  const reprogramar = async (s) => {
+    setError(""); setOkMsg("");
+    if (!reprogFecha || !reprogHora) { setError("Elige fecha y hora nuevas."); return; }
+    const { data: clash } = await supabase.from("sesiones").select("id").eq("fecha", reprogFecha).eq("hora", reprogHora).neq("estado", "Cancelada").neq("id", s.id).limit(1);
+    if (clash && clash.length > 0) { setError("Ese horario ya está ocupado. Elige otro."); return; }
+    const { error: err } = await supabase.from("sesiones").update({ fecha: reprogFecha, hora: reprogHora, estado: "Agendada" }).eq("id", s.id);
+    if (err) setError(err.message);
+    else { setReprogId(null); setOkMsg("Sesión reprogramada."); load(); }
+  };
+
+  const eliminar = async (s) => {
+    const { error: err } = await supabase.from("sesiones").delete().eq("id", s.id);
+    if (err) setError(err.message);
+    else load();
+  };
+
+  const crearVisita = async (e) => {
+    e.preventDefault();
+    setError(""); setOkMsg("");
+    if (!vNombre || !vFecha || !vHora) { setError("La visita necesita nombre, fecha y hora."); return; }
+    setVSaving(true);
+    const { error: err } = await supabase.from("visitas").insert({
+      cliente_id: vCliente || null, nombre: vNombre, telefono: vTelefono || null,
+      fecha: vFecha, hora: vHora, duracion: parseInt(vDuracion, 10) || 30, notas: vNotas || null,
+    });
+    setVSaving(false);
+    if (err) { setError(err.message); return; }
+    setVNombre(""); setVTelefono(""); setVCliente(""); setVFecha(""); setVHora(""); setVDuracion("30"); setVNotas("");
+    setOkMsg("Visita registrada.");
+    load();
+  };
+
+  const eliminarVisita = async (id) => {
+    const { error: err } = await supabase.from("visitas").delete().eq("id", id);
+    if (err) setError(err.message);
+    else load();
+  };
+
+  const telefonoDe = (s) => s.telefono || (clientes.find((c) => c.id === s.cliente_id) || {}).telefono || "";
 
   return (
     <div>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
-      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Todas las sesiones</h1>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Agenda</h1>
+      <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6 }}>Crea sesiones, cancela o reprograma, y registra visitas al estudio.</p>
+      {error && <p style={{ fontFamily: FONT, fontSize: 13, color: red, marginTop: 12 }}>{error}</p>}
+      {okMsg && <p style={{ fontFamily: FONT, fontSize: 13, color: green, marginTop: 12 }}>{okMsg}</p>}
+      {gcalAviso && <p style={{ fontFamily: FONT, fontSize: 13, color: amber, marginTop: 12 }}>Sesión guardada, pero no se pudo agregar al calendario de Google. Avisa al estudio para que la anoten.</p>}
+
+      <form onSubmit={crear} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVA SESIÓN</span>
+        {!tieneExtras && (
+          <p style={{ fontFamily: FONT, fontSize: 12.5, color: amber, marginTop: 6, lineHeight: 1.55 }}>
+            Las columnas de anticipo, paquete, set y nota aún no están en la base (migración 004 pendiente). La sesión se guarda igual, sin esos datos.
+          </p>
+        )}
+        <select value={fCliente} onChange={(e) => { setFCliente(e.target.value); const c = clientes.find((x) => x.id === e.target.value); setFTelefono(c?.telefono || ""); }} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+          <option value="">Cliente</option>
+          {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre || c.correo}</option>)}
+        </select>
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <input type="date" min={hoyISO} value={fFecha} onChange={(e) => { setFFecha(e.target.value); setFHora(""); }} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+          <select value={fHora} onChange={(e) => setFHora(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+            <option value="">Hora</option>
+            {slotsPara(fFecha).map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <select value={fPaquete} onChange={(e) => setFPaquete(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+            <option value="">Paquete (opcional)</option>
+            {PAQUETES.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={fSet} onChange={(e) => setFSet(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+            <option value="">Set (opcional)</option>
+            {["OCRE", "ÍNDIGO", "NOGAL", "ÓNIX", "Pantalla verde"].map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input type="number" min="0" placeholder="Anticipo $ (opcional)" value={fAnticipo} onChange={(e) => setFAnticipo(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+          <input placeholder="Teléfono (opcional)" value={fTelefono} onChange={(e) => setFTelefono(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        </div>
+        <input placeholder="Nota (opcional)" value={fNota} onChange={(e) => setFNota(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        <div className="mt-3">
+          <PillButton type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : "Crear sesión"}</PillButton>
+        </div>
+      </form>
+
       <div className="mt-6 space-y-3">
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>SESIONES</span>
         {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
         {!loading && sesiones.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Aún no hay sesiones agendadas.</p>}
-        {sesiones.map((s) => (
-          <div key={s.id} className="flex items-center justify-between p-4 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-            <div>
-              <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{s.clientes?.nombre || s.clientes?.correo}</p>
-              <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>{s.fecha} · {s.hora}</p>
+        {sesiones.map((s) => {
+          const cancelada = s.estado === "Cancelada";
+          const tel = telefonoDe(s);
+          const wa = tel ? waUrl(tel, `Hola ${s.clientes?.nombre || ""}, te confirmamos tu sesión en Élite Podhouse el ${fmtFecha(s.fecha)} a las ${s.hora}. Llega 10 minutos antes.`) : "";
+          return (
+            <div key={s.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{s.clientes?.nombre || s.clientes?.correo}</p>
+                  <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>
+                    {s.titulo || "Sesión de grabación"} · {cancelada ? "Cancelada" : `${fmtFecha(s.fecha)} · ${s.hora}`}
+                    {s.paquete ? ` · ${s.paquete}` : ""}{s.set ? ` · Set ${s.set}` : ""}{s.anticipo ? ` · Anticipo ${fmtMoney(s.anticipo)}` : ""}
+                  </p>
+                  {s.nota && <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>{s.nota}</p>}
+                </div>
+                <span className="px-2.5 py-1 rounded-full" style={{ background: cancelada ? "rgba(224,93,93,0.12)" : blueSoft, color: cancelada ? red : blueLight, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>{s.estado}</span>
+              </div>
+              <div className="flex gap-3 mt-3 flex-wrap">
+                {wa && <a href={wa} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
+                {!cancelada && (
+                  <>
+                    <button onClick={() => { setReprogId(reprogId === s.id ? null : s.id); setReprogFecha(s.fecha); setReprogHora(s.hora); }} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Reprogramar</button>
+                    <button onClick={() => cancelar(s)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: red, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Cancelar</button>
+                  </>
+                )}
+                {cancelada && (
+                  <button onClick={() => eliminar(s)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Eliminar</button>
+                )}
+              </div>
+              {reprogId === s.id && (
+                <div className="flex gap-2 mt-3">
+                  <input type="date" min={hoyISO} value={reprogFecha} onChange={(e) => { setReprogFecha(e.target.value); setReprogHora(""); }} className="rounded-lg px-3 py-2 outline-none" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }} />
+                  <select value={reprogHora} onChange={(e) => setReprogHora(e.target.value)} className="rounded-lg px-3 py-2 outline-none" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
+                    <option value="">Hora</option>
+                    {slotsPara(reprogFecha).map((h) => <option key={h} value={h}>{h}</option>)}
+                  </select>
+                  <button onClick={() => reprogramar(s)} className="rounded-lg px-3 py-2" style={{ background: blue, color: white, fontFamily: FONT, fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer" }}>Guardar</button>
+                </div>
+              )}
             </div>
-            <span className="px-2.5 py-1 rounded-full" style={{ background: blueSoft, color: blueLight, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>{s.estado}</span>
-          </div>
-        ))}
+          );
+        })}
+      </div>
+
+      <div className="mt-8">
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>VISITAS AL ESTUDIO</span>
+        {visitasMissing ? (
+          <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 8, lineHeight: 1.55 }}>
+            El registro de visitas aún no está activado en la base (tabla `visitas`, migración 004 pendiente). Cuando se aplique, aquí se registran las visitas con nombre, teléfono, fecha, hora y duración.
+          </p>
+        ) : (
+          <>
+            <form onSubmit={crearVisita} className="mt-3 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+              <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVA VISITA</span>
+              <input placeholder="Nombre de quien visita" value={vNombre} onChange={(e) => setVNombre(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <input placeholder="Teléfono" value={vTelefono} onChange={(e) => setVTelefono(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+                <select value={vCliente} onChange={(e) => setVCliente(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+                  <option value="">Cliente (opcional)</option>
+                  {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre || c.correo}</option>)}
+                </select>
+                <input type="date" min={hoyISO} value={vFecha} onChange={(e) => setVFecha(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+                <input type="time" value={vHora} onChange={(e) => setVHora(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+                <select value={vDuracion} onChange={(e) => setVDuracion(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+                  <option value="30">30 minutos</option>
+                  <option value="45">45 minutos</option>
+                  <option value="60">60 minutos</option>
+                </select>
+                <input placeholder="Notas (opcional)" value={vNotas} onChange={(e) => setVNotas(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+              </div>
+              <div className="mt-3">
+                <PillButton type="submit" disabled={vSaving}>{vSaving ? <Loader2 size={15} className="animate-spin" /> : "Registrar visita"}</PillButton>
+              </div>
+            </form>
+            <div className="space-y-2 mt-3">
+              {visitas.map((v) => {
+                const waV = v.telefono ? waUrl(v.telefono, `Hola ${v.nombre}, te confirmamos tu visita a Élite Podhouse el ${fmtFecha(v.fecha)} a las ${v.hora} (${v.duracion || 30} min).`) : "";
+                return (
+                  <div key={v.id} className="flex items-center justify-between p-4 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+                    <div>
+                      <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{v.nombre}</p>
+                      <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>{fmtFecha(v.fecha)} · {v.hora} · {v.duracion || 30} min{v.notas ? ` · ${v.notas}` : ""}</p>
+                    </div>
+                    <div className="flex gap-3">
+                      {waV && <a href={waV} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
+                      <button onClick={() => eliminarVisita(v.id)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Eliminar</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
