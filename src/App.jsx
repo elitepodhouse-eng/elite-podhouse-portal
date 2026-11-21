@@ -94,7 +94,10 @@ const ETAPAS = [
   { id: "publicado", label: "Publicado" },
 ];
 const ETAPA_PRIORIDAD = { en_revision: 3, en_edicion: 2, grabado: 1, publicado: 0 };
-const ETAPA_LABEL = Object.fromEntries(ETAPAS.map((e) => [e.id, e.label]));
+const ETAPA_LABEL = { por_grabar: "Por grabar", ...Object.fromEntries(ETAPAS.map((e) => [e.id, e.label])) };
+// Tablero de Producción: las 5 etapas válidas en la base
+// (el check de episodios.estado incluye 'por_grabar').
+const PRODUCCION_ETAPAS = [{ id: "por_grabar", label: "Por grabar" }, ...ETAPAS];
 
 const fmtMoney = (n) => `$${Number(n || 0).toLocaleString("es-MX", { maximumFractionDigits: 0 })}`;
 const fmtFecha = (iso) => {
@@ -216,28 +219,38 @@ function Card({ children, blue: isBlue, onClick }) {
 }
 
 // ---------- Auth ----------
+// ---------- Auth ----------
+// Entrada con usuario o correo: Supabase exige un correo por dentro, así
+// que quien no tiene correo real entra con uno interno sintético
+// `usuario@elitepodhouse.local` que nadie ve ni usa. El correo real sigue
+// funcionando igual que antes: Tania y Alejandro entran con su correo.
+// El registro público se quitó: las cuentas las crea Tania desde
+// Clientes → "Nuevo usuario" (con la función create-user).
+const USUARIO_DOMINIO = "@elitepodhouse.local";
+
+function loginPara(entrada) {
+  const texto = String(entrada || "").trim();
+  if (texto.includes("@")) return texto;
+  return `${texto.toLowerCase()}${USUARIO_DOMINIO}`;
+}
+
 function AuthScreen() {
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("");
+  const [entrada, setEntrada] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [signupDone, setSignupDone] = useState(false);
+  const [info, setInfo] = useState("");
   const [resetSent, setResetSent] = useState(false);
 
   const submit = async (e) => {
     e.preventDefault();
     setError("");
+    setInfo("");
     setLoading(true);
     try {
-      if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-      } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
-        if (!data.session) setSignupDone(true);
-      }
+      const email = loginPara(entrada);
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
     } catch (err) {
       setError(err.message);
     } finally {
@@ -246,11 +259,19 @@ function AuthScreen() {
   };
 
   const forgot = async () => {
-    if (!email) { setError("Escribe tu correo arriba para enviarte el enlace."); return; }
+    const texto = String(entrada || "").trim();
+    if (!texto) { setError("Escribe tu usuario o tu correo arriba."); return; }
+    // Sin correo real no hay a dónde mandar el enlace: lo restablece Tania.
+    if (!texto.includes("@")) {
+      setError("");
+      setInfo("Si entras con usuario, pídele a Tania que te restablezca la contraseña.");
+      return;
+    }
     setError("");
+    setInfo("");
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin });
+      const { error } = await supabase.auth.resetPasswordForEmail(texto, { redirectTo: window.location.origin });
       if (error) throw error;
       setResetSent(true);
     } catch (err) {
@@ -269,42 +290,35 @@ function AuthScreen() {
           <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 2 }}>Portal de clientes</p>
         </div>
 
-        {signupDone ? (
+        {resetSent ? (
           <div className="text-center">
             <CheckCircle2 size={28} color={blueLight} className="mx-auto mb-3" />
             <p style={{ fontFamily: FONT, fontSize: 14, color: white }}>
-              Cuenta creada. Revisa tu correo para confirmarla antes de iniciar sesión.
+              Te enviamos un correo con el enlace para crear una contraseña nueva. Revisa tu bandeja de entrada.
             </p>
-            <button onClick={() => { setSignupDone(false); setMode("login"); }} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
-              Ir a iniciar sesión
+            <button onClick={() => setResetSent(false)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 13, color: blueLight, marginTop: 16 }}>
+              Volver a iniciar sesión
             </button>
           </div>
         ) : (
           <form onSubmit={submit}>
             <ErrorBanner message={error} />
-            <Input label="CORREO" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@correo.com" />
+            {info && (
+              <p className="text-center mb-4" style={{ fontFamily: FONT, fontSize: 13, color: white, lineHeight: 1.55 }}>{info}</p>
+            )}
+            <Input label="USUARIO O CORREO" type="text" required value={entrada} onChange={(e) => setEntrada(e.target.value)} placeholder="tu usuario o tu@correo.com" />
             <Input label="CONTRASEÑA" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
             <PillButton full type="submit" disabled={loading}>
-              {loading ? <Loader2 size={15} className="animate-spin" /> : mode === "login" ? "Iniciar sesión" : "Crear cuenta"}
+              {loading ? <Loader2 size={15} className="animate-spin" /> : "Iniciar sesión"}
             </PillButton>
-            <p className="text-center mt-5" style={{ fontFamily: FONT, fontSize: 13, color: gray }}>
-              {mode === "login" ? "¿Eres nuevo cliente?" : "¿Ya tienes cuenta?"}{" "}
-              <button type="button" onClick={() => { setMode(mode === "login" ? "signup" : "login"); setError(""); }} style={{ color: blueLight, fontWeight: 600 }}>
-                {mode === "login" ? "Regístrate" : "Inicia sesión"}
+            <p className="text-center mt-3" style={{ fontFamily: FONT, fontSize: 13, color: gray }}>
+              <button type="button" onClick={forgot} disabled={loading} style={{ color: blueLight, fontWeight: 600 }}>
+                ¿Olvidaste tu contraseña?
               </button>
             </p>
-            {mode === "login" && (
-              <p className="text-center mt-3" style={{ fontFamily: FONT, fontSize: 13, color: gray }}>
-                <button type="button" onClick={forgot} disabled={loading} style={{ color: blueLight, fontWeight: 600 }}>
-                  ¿Olvidaste tu contraseña?
-                </button>
-              </p>
-            )}
-            {resetSent && (
-              <p className="text-center mt-4" style={{ fontFamily: FONT, fontSize: 13, color: white }}>
-                Te enviamos un correo con el enlace para crear una contraseña nueva. Revisa tu bandeja de entrada.
-              </p>
-            )}
+            <p className="text-center mt-5" style={{ fontFamily: FONT, fontSize: 12.5, color: gray, lineHeight: 1.55 }}>
+              ¿Aún no tienes cuenta? Pídele a Élite Podhouse que te cree tu usuario.
+            </p>
           </form>
         )}
       </div>
@@ -423,6 +437,54 @@ function Shell({ nav, view, setView, children }) {
 }
 
 // ---------- Client views ----------
+// Tarjeta "Mi cuenta": cambio de contraseña para quien entró con usuario
+// o con correo (vale la sesión actual; no se pide el correo).
+function MiCuentaCard({ perfil }) {
+  const [nueva, setNueva] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (nueva.length < 6) { setError("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (nueva !== confirm) { setError("Las contraseñas no coinciden."); return; }
+    setError("");
+    setSaving(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: nueva });
+      if (error) throw error;
+      setDone(true);
+      setNueva("");
+      setConfirm("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>MI CUENTA</span>
+      <p style={{ fontFamily: FONT, fontSize: 13.5, color: white, marginTop: 10 }}>
+        {perfil?.usuario ? `Usuario: ${perfil.usuario}` : perfil?.correo ? `Correo: ${perfil.correo}` : "Tu cuenta"}
+      </p>
+      <form onSubmit={submit} className="mt-4">
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>CAMBIAR CONTRASEÑA</span>
+        <input type="password" value={nueva} onChange={(e) => setNueva(e.target.value)} placeholder="Contraseña nueva (mínimo 6 caracteres)" className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Repite la contraseña" className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        <ErrorBanner message={error} />
+        {done && <p style={{ fontFamily: FONT, fontSize: 13, color: green, marginBottom: 12 }}>Contraseña actualizada ✓</p>}
+        <div className="mt-2">
+          <PillButton type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : "Guardar contraseña nueva"}</PillButton>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
 function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
   const now = new Date();
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -551,6 +613,9 @@ function ClientDashboard({ perfil, sesiones, episodios, pagos, goTo }) {
             <PillButton onClick={() => goTo("book")}>Reservar otra sesión <ArrowRight size={15} /></PillButton>
           </div>
         </Card>
+
+        {/* Mi cuenta */}
+        <MiCuentaCard perfil={perfil} />
       </div>
     </div>
   );
@@ -683,6 +748,7 @@ function DeliveriesView({ episodios, loading, missing, onChanged }) {
                     ? `El equipo está editando tu episodio${ep.fecha_entrega ? ` · entrega ${fmtFecha(ep.fecha_entrega)}` : ""}.`
                     : `Grabado${ep.fecha_grabacion ? ` el ${fmtFecha(ep.fecha_grabacion)}` : ""}, en cola de edición.`}
               {ep.set ? ` · Set ${ep.set.charAt(0) + ep.set.slice(1).toLowerCase()}` : ""}
+              {ep.responsable ? ` · Responsable: ${ep.responsable}` : ""}
             </p>
             {ep.estado === "en_revision" && (
               <div className="flex gap-2 mt-4">
@@ -1088,10 +1154,42 @@ function ClientPortal({ userId }) {
 }
 
 // ---------- Admin views ----------
+// Cuentas con usuario (sin correo): el portal llama a la Edge Function
+// create-user, que crea o migra el usuario en Auth con el correo interno
+// sintético `usuario@elitepodhouse.local` (usa service_role; por eso el
+// portal no puede hacerlo directo). Requiere la migración 003
+// (columna clientes.usuario) y la función desplegada con el secreto
+// SUPABASE_SERVICE_ROLE_KEY. Sin eso, el formulario muestra el error.
+function validarUsuario(u) {
+  const texto = String(u || "").trim().toLowerCase();
+  return /^[a-z0-9._-]{3,}$/.test(texto) ? texto : null;
+}
+
+async function invocarCreateUser(body) {
+  const { data, error } = await supabase.functions.invoke("create-user", { body });
+  if (error) throw new Error(error.message || "No se pudo contactar la función create-user. ¿Ya está desplegada?");
+  if (data && data.error) throw new Error(data.error);
+  return data;
+}
+
 function AdminClientes() {
   const [clientes, setClientes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
+  // Nuevo usuario (cuenta nueva con usuario y contraseña).
+  const [nuNombre, setNuNombre] = useState("");
+  const [nuUsuario, setNuUsuario] = useState("");
+  const [nuPassword, setNuPassword] = useState("");
+  const [nuPaquete, setNuPaquete] = useState("");
+  const [nuError, setNuError] = useState("");
+  const [nuOk, setNuOk] = useState("");
+  const [nuSaving, setNuSaving] = useState(false);
+  // Acceso con usuario para un cliente que ya existe.
+  const [migOpenId, setMigOpenId] = useState(null);
+  const [migUsuario, setMigUsuario] = useState("");
+  const [migPassword, setMigPassword] = useState("");
+  const [migError, setMigError] = useState("");
+  const [migSaving, setMigSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1109,10 +1207,78 @@ function AdminClientes() {
     setSavingId(null);
   };
 
+  const crearUsuario = async (e) => {
+    e.preventDefault();
+    setNuError("");
+    setNuOk("");
+    const usuario = validarUsuario(nuUsuario);
+    if (!nuNombre.trim()) { setNuError("Escribe el nombre del cliente."); return; }
+    if (!usuario) { setNuError("El usuario debe tener al menos 3 caracteres: solo letras, números, punto, guion y guion bajo."); return; }
+    if (nuPassword.length < 6) { setNuError("La contraseña debe tener al menos 6 caracteres."); return; }
+    setNuSaving(true);
+    try {
+      const data = await invocarCreateUser({ action: "create", nombre: nuNombre.trim(), usuario, password: nuPassword });
+      // El trigger on_auth_user_created ya crea la fila vacía al crear el
+      // usuario en Auth: el upsert solo le pone nombre, usuario y paquete.
+      const { error } = await supabase.from("clientes").upsert(
+        { id: data.id, nombre: nuNombre.trim(), usuario, paquete: nuPaquete || null },
+        { onConflict: "id" },
+      );
+      if (error) throw error;
+      setNuNombre(""); setNuUsuario(""); setNuPassword(""); setNuPaquete("");
+      setNuOk(`Usuario ${usuario} creado. Ya puede entrar con su usuario y contraseña.`);
+      load();
+    } catch (err) {
+      setNuError(err.message);
+    } finally {
+      setNuSaving(false);
+    }
+  };
+
+  const crearAcceso = async (e, cliente) => {
+    e.preventDefault();
+    setMigError("");
+    const usuario = validarUsuario(migUsuario);
+    if (!usuario) { setMigError("El usuario debe tener al menos 3 caracteres: solo letras, números, punto, guion y guion bajo."); return; }
+    if (migPassword.length < 6) { setMigError("La contraseña debe tener al menos 6 caracteres."); return; }
+    setMigSaving(true);
+    try {
+      await invocarCreateUser({ action: "migrate", usuario, password: migPassword, userId: cliente.id });
+      await update(cliente.id, { usuario });
+      setMigOpenId(null);
+      setMigUsuario(""); setMigPassword("");
+      load();
+    } catch (err) {
+      setMigError(err.message);
+    } finally {
+      setMigSaving(false);
+    }
+  };
+
   return (
     <div>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
       <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Clientes</h1>
+      <form onSubmit={crearUsuario} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVO USUARIO</span>
+        <p style={{ fontFamily: FONT, fontSize: 12.5, color: gray, marginTop: 6, lineHeight: 1.55 }}>
+          Crea la cuenta con usuario y contraseña, sin correo. El cliente entra al portal con su usuario.
+        </p>
+        <input placeholder="Nombre completo" value={nuNombre} onChange={(e) => setNuNombre(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          <input placeholder="Usuario (p. ej. luis)" value={nuUsuario} onChange={(e) => setNuUsuario(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+          <input type="password" placeholder="Contraseña (mínimo 6)" value={nuPassword} onChange={(e) => setNuPassword(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
+        </div>
+        <select value={nuPaquete} onChange={(e) => setNuPaquete(e.target.value)} className="w-full rounded-xl px-3 py-2.5 mt-2" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+          <option value="">Paquete (opcional)</option>
+          {PAQUETES.map((p) => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <ErrorBanner message={nuError} />
+        {nuOk && <p style={{ fontFamily: FONT, fontSize: 13, color: green, marginBottom: 12 }}>{nuOk}</p>}
+        <div className="mt-2">
+          <PillButton type="submit" disabled={nuSaving}>{nuSaving ? <Loader2 size={15} className="animate-spin" /> : "Crear usuario"}</PillButton>
+        </div>
+      </form>
       <div className="mt-6 space-y-3">
         {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
         {clientes.map((c) => (
@@ -1121,6 +1287,7 @@ function AdminClientes() {
               <div>
                 <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{c.nombre || c.correo}</p>
                 <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray }}>{c.correo}</p>
+                {c.usuario && <p style={{ fontFamily: FONT, fontSize: 11.5, color: blueLight, marginTop: 2 }}>Usuario: {c.usuario}</p>}
               </div>
               <span className="px-2.5 py-1 rounded-full" style={{ background: c.activo ? blueSoft : "rgba(224,93,93,0.12)", color: c.activo ? blueLight : red, fontFamily: FONT, fontSize: 10.5, fontWeight: 600 }}>
                 {c.activo ? "Activo" : "Pendiente"}
@@ -1139,6 +1306,29 @@ function AdminClientes() {
             <button onClick={() => update(c.id, { activo: !c.activo })} className="mt-2 text-left" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }} disabled={savingId === c.id}>
               {savingId === c.id ? "Guardando…" : c.activo ? "Desactivar cuenta" : "Activar cuenta"}
             </button>
+            {!c.usuario && (
+              migOpenId === c.id ? (
+                <form onSubmit={(e) => crearAcceso(e, c)} className="mt-3 rounded-xl p-3" style={{ background: navy, border: `1px solid ${cardAlt}` }}>
+                  <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>CREAR ACCESO CON USUARIO</span>
+                  <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 4, lineHeight: 1.5 }}>
+                    Después de esto, el cliente entrará con su usuario y contraseña (ya no con su correo).
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <input placeholder="Usuario (p. ej. luis)" value={migUsuario} onChange={(e) => setMigUsuario(e.target.value)} className="rounded-lg px-3 py-2 outline-none" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }} />
+                    <input type="password" placeholder="Contraseña (mínimo 6)" value={migPassword} onChange={(e) => setMigPassword(e.target.value)} className="rounded-lg px-3 py-2 outline-none" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }} />
+                  </div>
+                  <ErrorBanner message={migError} />
+                  <div className="flex gap-2 mt-2">
+                    <PillButton type="submit" disabled={migSaving}>{migSaving ? <Loader2 size={15} className="animate-spin" /> : "Crear acceso"}</PillButton>
+                    <PillButton ghost onClick={() => { setMigOpenId(null); setMigError(""); }}>Cancelar</PillButton>
+                  </div>
+                </form>
+              ) : (
+                <button onClick={() => { setMigOpenId(c.id); setMigUsuario(""); setMigPassword(""); setMigError(""); }} className="mt-2 text-left block" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }}>
+                  Crear acceso con usuario
+                </button>
+              )
+            )}
           </div>
         ))}
       </div>
@@ -1190,6 +1380,19 @@ function useClientesList() {
   return clientes;
 }
 
+// Colaboradores del estudio (tabla `colaboradores`): se usan para asignar
+// el responsable de cada episodio en Entregas y en Producción.
+function useColaboradores() {
+  const [colabs, setColabs] = useState([]);
+  useEffect(() => {
+    (async () => {
+      const res = await safeSelect("colaboradores", supabase.from("colaboradores").select("*").order("nombre"));
+      setColabs(res.data || []);
+    })();
+  }, []);
+  return colabs;
+}
+
 function MissingTablesBanner() {
   return (
     <div className="rounded-2xl p-4 mb-4" style={{ background: amberBg, border: `1px solid ${amber}44` }}>
@@ -1204,6 +1407,7 @@ function MissingTablesBanner() {
 
 function AdminEntregas() {
   const clientes = useClientesList();
+  const colabs = useColaboradores();
   const [clienteId, setClienteId] = useState("");
   const [episodios, setEpisodios] = useState([]);
   const [missing, setMissing] = useState(false);
@@ -1211,6 +1415,7 @@ function AdminEntregas() {
   const [titulo, setTitulo] = useState("");
   const [tipo, setTipo] = useState("podcast");
   const [setNombre, setSetNombre] = useState("");
+  const [responsable, setResponsable] = useState("");
   const [fechaGrab, setFechaGrab] = useState("");
   const [fechaEntrega, setFechaEntrega] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1232,6 +1437,11 @@ function AdminEntregas() {
     if (!error) load(clienteId);
   };
 
+  const setResponsableEp = async (ep, nombre) => {
+    const { error } = await supabase.from("episodios").update({ responsable: nombre || null }).eq("id", ep.id);
+    if (!error) load(clienteId);
+  };
+
   const add = async (e) => {
     e.preventDefault();
     setError("");
@@ -1240,10 +1450,11 @@ function AdminEntregas() {
     const { error } = await supabase.from("episodios").insert({
       cliente_id: clienteId, titulo, tipo, set: setNombre || null,
       estado: "grabado",
+      responsable: responsable || null,
       fecha_grabacion: fechaGrab || null, fecha_entrega: fechaEntrega || null,
     });
     if (error) setError(error.message);
-    else { setTitulo(""); setFechaGrab(""); setFechaEntrega(""); load(clienteId); }
+    else { setTitulo(""); setResponsable(""); setFechaGrab(""); setFechaEntrega(""); load(clienteId); }
     setSaving(false);
   };
 
@@ -1279,6 +1490,15 @@ function AdminEntregas() {
               {ep.fecha_grabacion && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Grabado el {fmtFecha(ep.fecha_grabacion)}</span>}
               {ep.fecha_entrega && <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Entrega {fmtFecha(ep.fecha_entrega)}</span>}
             </div>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Responsable:</label>
+              <span style={{ fontFamily: FONT, fontSize: 12, color: white }}>{ep.responsable || "Sin asignar"}</span>
+              <select value={ep.responsable || ""} onChange={(e) => setResponsableEp(ep, e.target.value)} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
+                <option value="">Sin asignar</option>
+                {colabs.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                {ep.responsable && !colabs.some((c) => c.nombre === ep.responsable) && <option value={ep.responsable}>{ep.responsable}</option>}
+              </select>
+            </div>
           </div>
         ))}
       </div>
@@ -1303,12 +1523,125 @@ function AdminEntregas() {
               <input type="date" value={fechaEntrega} onChange={(e) => setFechaEntrega(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-1" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
             </label>
           </div>
+          <label style={{ fontFamily: FONT, fontSize: 12, color: gray, display: "block", marginTop: 8 }}>Responsable
+            <select value={responsable} onChange={(e) => setResponsable(e.target.value)} className="w-full rounded-xl px-3 py-2.5 mt-1" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
+              <option value="">Sin asignar</option>
+              {colabs.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+            </select>
+          </label>
           <ErrorBanner message={error} />
           <div className="mt-3">
             <PillButton type="submit" disabled={saving}>{saving ? <Loader2 size={15} className="animate-spin" /> : "Agregar episodio"}</PillButton>
           </div>
         </form>
       )}
+    </div>
+  );
+}
+
+// Tablero de Producción: todos los episodios de todos los clientes en
+// un solo lugar, con filtros por etapa y cambio de etapa y responsable
+// directo en cada tarjeta.
+function AdminProduccion() {
+  const colabs = useColaboradores();
+  const [episodios, setEpisodios] = useState([]);
+  const [clientesMap, setClientesMap] = useState({});
+  const [filtro, setFiltro] = useState("todos");
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [ep, cl] = await Promise.all([
+      safeSelect("episodios", supabase.from("episodios").select("*")),
+      supabase.from("clientes").select("id, nombre, correo"),
+    ]);
+    const ordenados = [...(ep.data || [])].sort((a, b) => {
+      if (!a.fecha_grabacion && !b.fecha_grabacion) return 0;
+      if (!a.fecha_grabacion) return 1;
+      if (!b.fecha_grabacion) return -1;
+      return String(a.fecha_grabacion).localeCompare(String(b.fecha_grabacion));
+    });
+    setEpisodios(ordenados);
+    setMissing(ep.missing);
+    const map = {};
+    (cl.data || []).forEach((c) => { map[c.id] = c.nombre || c.correo || "Cliente"; });
+    setClientesMap(map);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const setEtapa = async (ep, estado) => {
+    const { error } = await supabase.from("episodios").update({ estado }).eq("id", ep.id);
+    if (!error) load();
+  };
+
+  const setResponsableEp = async (ep, nombre) => {
+    const { error } = await supabase.from("episodios").update({ responsable: nombre || null }).eq("id", ep.id);
+    if (!error) load();
+  };
+
+  const conteos = { todos: episodios.length };
+  PRODUCCION_ETAPAS.forEach((t) => { conteos[t.id] = episodios.filter((e) => e.estado === t.id).length; });
+  const visibles = filtro === "todos" ? episodios : episodios.filter((e) => e.estado === filtro);
+  const filtros = [{ id: "todos", label: "Todos" }, ...PRODUCCION_ETAPAS];
+
+  return (
+    <div>
+      <Eyebrow>ADMINISTRACIÓN</Eyebrow>
+      <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Producción</h1>
+      <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6 }}>
+        Todos los episodios en producción, por etapa y con su responsable.
+      </p>
+      {missing && <div className="mt-4"><MissingTablesBanner /></div>}
+      <div className="flex gap-2 mt-6 flex-wrap">
+        {filtros.map((f) => (
+          <button key={f.id} onClick={() => setFiltro(f.id)} className="px-3.5 py-2 rounded-full" style={{ background: filtro === f.id ? blue : card, border: `1px solid ${filtro === f.id ? blue : cardAlt}`, color: filtro === f.id ? white : gray, fontFamily: FONT, fontSize: 12.5, fontWeight: 600 }}>
+            {f.label} · {conteos[f.id] || 0}
+          </button>
+        ))}
+      </div>
+      {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 16 }}>Cargando…</p>}
+      {!loading && !missing && episodios.length === 0 && (
+        <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 16 }}>Aún no hay episodios en producción.</p>
+      )}
+      {!loading && !missing && visibles.length === 0 && episodios.length > 0 && (
+        <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 16 }}>Ningún episodio en esta etapa.</p>
+      )}
+      <div className="space-y-3 mt-4">
+        {visibles.map((ep) => (
+          <div key={ep.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{ep.titulo}</p>
+                <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 2 }}>{clientesMap[ep.cliente_id] || "Cliente"}</p>
+              </div>
+              <EtapaPill etapa={ep.estado} />
+            </div>
+            <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 8 }}>
+              {ep.set ? `Set ${ep.set.charAt(0) + ep.set.slice(1).toLowerCase()} · ` : ""}
+              {ep.fecha_grabacion ? `Grabado el ${fmtFecha(ep.fecha_grabacion)}` : "Sin fecha de grabación"}
+              {ep.fecha_entrega ? ` · Entrega ${fmtFecha(ep.fecha_entrega)}` : ""}
+            </p>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Etapa:</label>
+              <select value={ep.estado} onChange={(e) => setEtapa(ep, e.target.value)} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
+                {PRODUCCION_ETAPAS.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </div>
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <label style={{ fontFamily: FONT, fontSize: 12, color: gray }}>Responsable:</label>
+              <span style={{ fontFamily: FONT, fontSize: 12, color: white }}>{ep.responsable || "Sin asignar"}</span>
+              <select value={ep.responsable || ""} onChange={(e) => setResponsableEp(ep, e.target.value)} className="rounded-lg px-3 py-2" style={{ background: cardAlt, color: white, fontFamily: FONT, fontSize: 12.5, border: "none" }}>
+                <option value="">Sin asignar</option>
+                {colabs.map((c) => <option key={c.id} value={c.nombre}>{c.nombre}</option>)}
+                {ep.responsable && !colabs.some((c) => c.nombre === ep.responsable) && <option value={ep.responsable}>{ep.responsable}</option>}
+              </select>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1555,6 +1888,7 @@ function AdminPortal() {
     { id: "clientes", label: "Clientes", icon: Users },
     { id: "sesiones", label: "Sesiones", icon: CalIcon },
     { id: "entregas", label: "Entregas", icon: Sparkles },
+    { id: "produccion", label: "Producción", icon: Package },
     { id: "pagos", label: "Pagos", icon: Wallet },
     { id: "propuestas", label: "Propuestas", icon: FileText },
     { id: "cotizador", label: "Cotizador", icon: FileText },
@@ -1572,6 +1906,7 @@ function AdminPortal() {
       {view === "clientes" && <AdminClientes />}
       {view === "sesiones" && <AdminSesiones />}
       {view === "entregas" && <AdminEntregas />}
+      {view === "produccion" && <AdminProduccion />}
       {view === "pagos" && <AdminPagos />}
       {view === "propuestas" && <AdminPropuestas />}
       {view === "cotizador" && <AdminCotizador />}
