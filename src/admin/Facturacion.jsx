@@ -35,6 +35,7 @@ export default function AdminFacturacion() {
   const [cobranzaId, setCobranzaId] = useState("");
   const [nota, setNota] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editFId, setEditFId] = useState(null);
 
   // Form mes fiscal
   const [ivaAcred, setIvaAcred] = useState("");
@@ -56,13 +57,28 @@ export default function AdminFacturacion() {
 
   const failMsg = "Falta aplicar la migración supabase/migrations/002_finanzas_facturacion.sql en Supabase.";
 
+  const limpiarFormF = () => { setFolio(""); setCliente(""); setConcepto(""); setSubtotal(""); setIva(""); setEsMoral(false); setCobrada(false); setFechaCobro(""); setNota(""); setCobranzaId(""); setEditFId(null); };
+  const startEditF = (f) => {
+    setFolio(f.folio || "");
+    setCliente(f.cliente || "");
+    setConcepto(f.concepto || "");
+    setSubtotal(String(f.subtotal ?? ""));
+    setIva(String(f.iva ?? ""));
+    setEsMoral(!!f.es_moral);
+    setCobrada(!!f.cobrada);
+    setFechaCobro(f.fecha_cobro || "");
+    setNota(f.nota || "");
+    setCobranzaId(f.cobranza_id || "");
+    setEditFId(f.id);
+    setError(""); setOk("");
+    document.getElementById("form-factura-fiscal")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const guardarFiscal = async (e) => {
     e.preventDefault(); setError(""); setOk("");
     if (!cliente || !concepto) { setError("Escribe cliente y concepto."); return; }
     setSaving(true);
-    const { error } = await supabase.from("facturas_fiscales").insert({
-      cobranza_id: cobranzaId || null,
-      fecha: todayISO(),
+    const datos = {
       folio: folio || null,
       cliente, concepto,
       subtotal: Number(subtotal) || 0,
@@ -70,11 +86,14 @@ export default function AdminFacturacion() {
       es_moral: esMoral,
       cobrada,
       fecha_cobro: cobrada ? (fechaCobro || todayISO()) : null,
-      estado: "Vigente",
       nota: nota || null,
-    });
+      cobranza_id: cobranzaId || null,
+    };
+    const { error } = editFId
+      ? await supabase.from("facturas_fiscales").update(datos).eq("id", editFId)
+      : await supabase.from("facturas_fiscales").insert({ ...datos, fecha: todayISO(), estado: "Vigente" });
     if (error) setError(error.code === "PGRST205" ? failMsg : error.message);
-    else { setFolio(""); setCliente(""); setConcepto(""); setSubtotal(""); setIva(""); setNota(""); setCobranzaId(""); setOk("Factura fiscal registrada."); load(); }
+    else { limpiarFormF(); setOk(editFId ? "Factura actualizada." : "Factura fiscal registrada."); load(); }
     setSaving(false);
   };
 
@@ -191,6 +210,7 @@ export default function AdminFacturacion() {
               {f.folio ? `Folio ${f.folio} · ` : ""}{f.fecha ? fmtFecha(f.fecha) : ""} · Subtotal {fmtMoney(f.subtotal)} + IVA {fmtMoney(f.iva)}{f.es_moral ? " · Persona moral" : ""}
             </p>
             <div className="flex gap-3 mt-2">
+              <button onClick={() => startEditF(f)} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Editar</button>
               <button onClick={() => marcarCobrada(f)} style={{ fontFamily: FONT, fontSize: 12.5, color: green, fontWeight: 600 }}>{f.cobrada ? "Marcar no cobrada" : "Marcar cobrada"}</button>
               <button onClick={() => cancelar(f)} style={{ fontFamily: FONT, fontSize: 12.5, color: red, fontWeight: 600 }}>{f.estado === "Cancelada" ? "Reactivar" : "Cancelar"}</button>
             </div>
@@ -200,8 +220,8 @@ export default function AdminFacturacion() {
       </div>
 
       {/* Nueva factura fiscal */}
-      <form onSubmit={guardarFiscal} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVA FACTURA FISCAL</span>
+      <form id="form-factura-fiscal" onSubmit={guardarFiscal} className="mt-6 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+        <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>{editFId ? "EDITAR FACTURA FISCAL" : "NUEVA FACTURA FISCAL"}</span>
         <div className="grid grid-cols-2 gap-2 mt-3">
           <input placeholder="Folio" value={folio} onChange={(e) => setFolio(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={inputStyle} />
           <input placeholder="Cliente *" value={cliente} onChange={(e) => setCliente(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={inputStyle} />
@@ -237,7 +257,11 @@ export default function AdminFacturacion() {
         </div>
         <input placeholder="Nota (opcional)" value={nota} onChange={(e) => setNota(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={inputStyle} />
         <ErrorBanner message={error} />
-        <div className="mt-3"><PillButton type="submit" disabled={saving}>{saving ? "Guardando…" : "Guardar factura fiscal"}</PillButton></div>
+        <OkBanner message={ok} />
+        <div className="mt-3 flex gap-2">
+          <PillButton type="submit" disabled={saving}>{saving ? "Guardando…" : editFId ? "Guardar cambios" : "Guardar factura fiscal"}</PillButton>
+          {editFId && <PillButton type="button" ghost onClick={limpiarFormF}>Cancelar</PillButton>}
+        </div>
       </form>
     </div>
   );

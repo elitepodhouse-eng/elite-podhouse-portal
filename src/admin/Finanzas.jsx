@@ -76,18 +76,23 @@ export default function AdminFinanzas() {
   const [mvMetodo, setMvMetodo] = useState("Transferencia");
   const [mvNota, setMvNota] = useState("");
   const [mvSaving, setMvSaving] = useState(false);
+  const [editMvId, setEditMvId] = useState(null);
+  const [filtroMes, setFiltroMes] = useState(todayISO().slice(0, 7));
+  const [filtroTipo, setFiltroTipo] = useState("Todos");
 
   const [gfConcepto, setGfConcepto] = useState("");
   const [gfCategoria, setGfCategoria] = useState(CAT_EGRESO[3]);
   const [gfMonto, setGfMonto] = useState("");
   const [gfMetodo, setGfMetodo] = useState("Transferencia");
   const [gfSaving, setGfSaving] = useState(false);
+  const [editGfId, setEditGfId] = useState(null);
 
   const [cbNombre, setCbNombre] = useState("");
   const [cbServicio, setCbServicio] = useState("");
   const [cbTelefono, setCbTelefono] = useState("");
   const [cbCorreo, setCbCorreo] = useState("");
   const [cbSaving, setCbSaving] = useState(false);
+  const [editCbId, setEditCbId] = useState(null);
   const [selColab, setSelColab] = useState(null);
   const [pcFecha, setPcFecha] = useState(todayISO());
   const [pcConcepto, setPcConcepto] = useState("");
@@ -98,33 +103,81 @@ export default function AdminFinanzas() {
   const [pcArchivo, setPcArchivo] = useState(null);
   const [pcSaving, setPcSaving] = useState(false);
 
+  // Lista de movimientos con filtros (mes + tipo). Por defecto, el mes actual.
+  const movFiltrados = movimientos.filter((m) => (filtroMes ? (m.fecha || "").startsWith(filtroMes) : true) && (filtroTipo === "Todos" || m.tipo === filtroTipo));
+  const filIng = movFiltrados.filter((x) => x.tipo === "ingreso").reduce((t, x) => t + Number(x.monto || 0), 0);
+  const filEgr = movFiltrados.filter((x) => x.tipo === "egreso").reduce((t, x) => t + Number(x.monto || 0), 0);
+
   const failMsg = "Falta aplicar la migración supabase/migrations/002_finanzas_facturacion.sql en Supabase.";
+
+  const limpiarFormMv = () => { setMvConcepto(""); setMvMonto(""); setMvNota(""); setEditMvId(null); };
+  const startEditMv = (m) => {
+    setMvTipo(m.tipo || "egreso");
+    setMvFecha(m.fecha || todayISO());
+    setMvConcepto(m.concepto || "");
+    setMvCategoria(m.categoria || (m.tipo === "ingreso" ? CAT_INGRESO[0] : CAT_EGRESO[0]));
+    setMvMonto(String(m.monto ?? ""));
+    setMvMetodo(m.metodo || "Transferencia");
+    setMvNota(m.nota || "");
+    setEditMvId(m.id);
+    setError(""); setOk("");
+    document.getElementById("form-movimiento")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const addMovimiento = async (e) => {
     e.preventDefault(); setError(""); setOk("");
     if (!mvConcepto || !mvMonto) { setError("Escribe concepto y monto."); return; }
     setMvSaving(true);
-    const { error } = await supabase.from("movimientos").insert({ tipo: mvTipo, fecha: mvFecha || todayISO(), concepto: mvConcepto, categoria: mvCategoria, monto: Number(mvMonto), metodo: mvMetodo, nota: mvNota || null });
+    const datos = { tipo: mvTipo, fecha: mvFecha || todayISO(), concepto: mvConcepto, categoria: mvCategoria, monto: Number(mvMonto), metodo: mvMetodo, nota: mvNota || null };
+    const { error } = editMvId
+      ? await supabase.from("movimientos").update(datos).eq("id", editMvId)
+      : await supabase.from("movimientos").insert(datos);
     if (error) setError(error.code === "PGRST205" ? failMsg : error.message);
-    else { setMvConcepto(""); setMvMonto(""); setMvNota(""); setOk("Movimiento guardado."); load(); }
+    else { limpiarFormMv(); setOk(editMvId ? "Movimiento actualizado." : "Movimiento guardado."); load(); }
     setMvSaving(false);
+  };
+  const limpiarFormGf = () => { setGfConcepto(""); setGfMonto(""); setEditGfId(null); };
+  const startEditGf = (g) => {
+    setGfConcepto(g.concepto || "");
+    setGfCategoria(g.categoria || CAT_EGRESO[3]);
+    setGfMonto(String(g.monto ?? ""));
+    setGfMetodo(g.metodo || "Transferencia");
+    setEditGfId(g.id);
+    setError(""); setOk("");
+    document.getElementById("form-gasto-fijo")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   const addGasto = async (e) => {
     e.preventDefault(); setError(""); setOk("");
     if (!gfConcepto || !gfMonto) { setError("Escribe concepto y monto."); return; }
     setGfSaving(true);
-    const { error } = await supabase.from("gastos_fijos").insert({ concepto: gfConcepto, categoria: gfCategoria, monto: Number(gfMonto), metodo: gfMetodo });
+    const datos = { concepto: gfConcepto, categoria: gfCategoria, monto: Number(gfMonto), metodo: gfMetodo };
+    const { error } = editGfId
+      ? await supabase.from("gastos_fijos").update(datos).eq("id", editGfId)
+      : await supabase.from("gastos_fijos").insert(datos);
     if (error) setError(error.code === "PGRST205" ? failMsg : error.message);
-    else { setGfConcepto(""); setGfMonto(""); setOk("Gasto fijo guardado."); load(); }
+    else { limpiarFormGf(); setOk(editGfId ? "Gasto fijo actualizado." : "Gasto fijo guardado."); load(); }
     setGfSaving(false);
+  };
+  const limpiarFormCb = () => { setCbNombre(""); setCbServicio(""); setCbTelefono(""); setCbCorreo(""); setEditCbId(null); };
+  const startEditCb = (c) => {
+    setCbNombre(c.nombre || "");
+    setCbServicio(c.servicio || "");
+    setCbTelefono(c.telefono || "");
+    setCbCorreo(c.correo || "");
+    setEditCbId(c.id);
+    setError(""); setOk("");
+    document.getElementById("form-colaborador")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
   const addColab = async (e) => {
     e.preventDefault(); setError(""); setOk("");
     if (!cbNombre.trim()) { setError("Escribe el nombre del colaborador."); return; }
     setCbSaving(true);
-    const { error } = await supabase.from("colaboradores").insert({ nombre: cbNombre.trim(), servicio: cbServicio || null, telefono: cbTelefono || null, correo: cbCorreo || null });
+    const datos = { nombre: cbNombre.trim(), servicio: cbServicio || null, telefono: cbTelefono || null, correo: cbCorreo || null };
+    const { error } = editCbId
+      ? await supabase.from("colaboradores").update(datos).eq("id", editCbId)
+      : await supabase.from("colaboradores").insert(datos);
     if (error) setError(error.code === "PGRST205" ? failMsg : error.message);
-    else { setCbNombre(""); setCbServicio(""); setCbTelefono(""); setCbCorreo(""); setOk("Colaborador guardado."); load(); }
+    else { limpiarFormCb(); setOk(editCbId ? "Colaborador actualizado." : "Colaborador guardado."); load(); }
     setCbSaving(false);
   };
   const addPagoColab = async (e) => {
@@ -147,9 +200,26 @@ export default function AdminFinanzas() {
     else { setPcConcepto(""); setPcMonto(""); setPcNota(""); setPcComprobante(""); setPcArchivo(null); setOk("Pago registrado."); load(); }
     setPcSaving(false);
   };
-  const delMov = async (id) => { const { error } = await supabase.from("movimientos").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
-  const delGasto = async (id) => { const { error } = await supabase.from("gastos_fijos").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
-  const delPagoColab = async (id) => { const { error } = await supabase.from("pagos_colaboradores").delete().eq("id", id); if (error) { setError(error.message); return; } load(); };
+  const delMov = async (id) => {
+    setError(""); setOk("");
+    const { error } = await supabase.from("movimientos").delete().eq("id", id);
+    if (error) { setError(error.message); return; }
+    if (editMvId === id) limpiarFormMv();
+    setOk("Movimiento eliminado."); load();
+  };
+  const delGasto = async (id) => {
+    setError(""); setOk("");
+    const { error } = await supabase.from("gastos_fijos").delete().eq("id", id);
+    if (error) { setError(error.message); return; }
+    if (editGfId === id) limpiarFormGf();
+    setOk("Gasto fijo eliminado."); load();
+  };
+  const delPagoColab = async (id) => {
+    setError(""); setOk("");
+    const { error } = await supabase.from("pagos_colaboradores").delete().eq("id", id);
+    if (error) { setError(error.message); return; }
+    setOk("Pago eliminado."); load();
+  };
 
   const tabs = [
     { id: "resumen", label: "Resumen" },
@@ -224,8 +294,8 @@ export default function AdminFinanzas() {
 
       {tab === "movimientos" && (
         <div>
-          <form onSubmit={addMovimiento} className="mt-5 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVO MOVIMIENTO</span>
+          <form id="form-movimiento" onSubmit={addMovimiento} className="mt-5 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>{editMvId ? "EDITAR MOVIMIENTO" : "NUEVO MOVIMIENTO"}</span>
             <div className="grid grid-cols-2 gap-2 mt-3">
               <select value={mvTipo} onChange={(e) => { setMvTipo(e.target.value); setMvCategoria(e.target.value === "ingreso" ? CAT_INGRESO[0] : CAT_EGRESO[0]); }} className="rounded-xl px-3 py-2.5" style={inputStyle}>
                 <option value="ingreso">Ingreso</option>
@@ -246,10 +316,27 @@ export default function AdminFinanzas() {
             <input placeholder="Nota (opcional)" value={mvNota} onChange={(e) => setMvNota(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-2" style={inputStyle} />
             <ErrorBanner message={error} />
             <OkBanner message={ok} />
-            <div className="mt-2"><PillButton type="submit" disabled={mvSaving}>{mvSaving ? "Guardando…" : "Guardar movimiento"}</PillButton></div>
+            <div className="mt-2 flex gap-2">
+              <PillButton type="submit" disabled={mvSaving}>{mvSaving ? "Guardando…" : editMvId ? "Guardar cambios" : "Guardar movimiento"}</PillButton>
+              {editMvId && <PillButton type="button" ghost onClick={limpiarFormMv}>Cancelar</PillButton>}
+            </div>
           </form>
-          <div className="space-y-2 mt-4">
-            {movimientos.map((m) => (
+          <div className="flex gap-2 mt-4 flex-wrap items-center">
+            <input type="month" value={filtroMes} onChange={(e) => setFiltroMes(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={inputStyle} />
+            <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} className="rounded-xl px-3 py-2.5" style={inputStyle}>
+              <option value="Todos">Ingresos y egresos</option>
+              <option value="ingreso">Solo ingresos</option>
+              <option value="egreso">Solo egresos</option>
+            </select>
+            {(filtroMes || filtroTipo !== "Todos") && (
+              <button onClick={() => { setFiltroMes(""); setFiltroTipo("Todos"); }} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Ver todos</button>
+            )}
+            <span style={{ fontFamily: FONT, fontSize: 12, color: gray }}>
+              {movFiltrados.length} {movFiltrados.length === 1 ? "movimiento" : "movimientos"} · Ingresos {fmtMoney(filIng)} · Egresos {fmtMoney(filEgr)}
+            </span>
+          </div>
+          <div className="space-y-2 mt-3">
+            {movFiltrados.map((m) => (
               <div key={m.id} className="flex items-center justify-between p-3 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
                 <div>
                   <p style={{ fontFamily: FONT, fontSize: 13.5, color: white }}>{m.concepto}</p>
@@ -257,11 +344,12 @@ export default function AdminFinanzas() {
                 </div>
                 <div className="flex items-center gap-3">
                   <b style={{ fontFamily: FONT, fontSize: 14, color: m.tipo === "ingreso" ? green : red }}>{m.tipo === "ingreso" ? "+" : "−"}{fmtMoney(m.monto)}</b>
+                  <button onClick={() => startEditMv(m)} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Editar</button>
                   <button onClick={() => delMov(m.id)} style={{ fontFamily: FONT, fontSize: 12.5, color: red, fontWeight: 600 }}>Eliminar</button>
                 </div>
               </div>
             ))}
-            {movimientos.length === 0 && !loading && <EmptyNote>Sin movimientos todavía. Todo vacío hasta migrar la hoja privada.</EmptyNote>}
+            {movFiltrados.length === 0 && !loading && <EmptyNote>{movimientos.length === 0 ? "Sin movimientos todavía. Todo vacío hasta migrar la hoja privada." : "Sin movimientos en este filtro."}</EmptyNote>}
           </div>
         </div>
       )}
@@ -272,8 +360,8 @@ export default function AdminFinanzas() {
             <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>TOTAL MENSUAL DE GASTOS FIJOS</span>
             <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white, marginTop: 6 }}>{fmtMoney(fijosTotal)}</p>
           </div>
-          <form onSubmit={addGasto} className="mt-4 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVO GASTO FIJO</span>
+          <form id="form-gasto-fijo" onSubmit={addGasto} className="mt-4 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>{editGfId ? "EDITAR GASTO FIJO" : "NUEVO GASTO FIJO"}</span>
             <input placeholder="Concepto *" value={gfConcepto} onChange={(e) => setGfConcepto(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={inputStyle} />
             <div className="grid grid-cols-3 gap-2 mt-2">
               <select value={gfCategoria} onChange={(e) => setGfCategoria(e.target.value)} className="rounded-xl px-3 py-2.5" style={inputStyle}>
@@ -286,7 +374,10 @@ export default function AdminFinanzas() {
             </div>
             <ErrorBanner message={error} />
             <OkBanner message={ok} />
-            <div className="mt-2"><PillButton type="submit" disabled={gfSaving}>{gfSaving ? "Guardando…" : "Guardar gasto fijo"}</PillButton></div>
+            <div className="mt-2 flex gap-2">
+              <PillButton type="submit" disabled={gfSaving}>{gfSaving ? "Guardando…" : editGfId ? "Guardar cambios" : "Guardar gasto fijo"}</PillButton>
+              {editGfId && <PillButton type="button" ghost onClick={limpiarFormGf}>Cancelar</PillButton>}
+            </div>
           </form>
           <div className="space-y-2 mt-4">
             {gastos.map((g) => (
@@ -297,6 +388,7 @@ export default function AdminFinanzas() {
                 </div>
                 <div className="flex items-center gap-3">
                   <b style={{ fontFamily: FONT, fontSize: 14, color: white }}>{fmtMoney(g.monto)}</b>
+                  <button onClick={() => startEditGf(g)} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Editar</button>
                   <button onClick={() => delGasto(g.id)} style={{ fontFamily: FONT, fontSize: 12.5, color: red, fontWeight: 600 }}>Eliminar</button>
                 </div>
               </div>
@@ -308,8 +400,8 @@ export default function AdminFinanzas() {
 
       {tab === "colaboradores" && (
         <div>
-          <form onSubmit={addColab} className="mt-5 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVO COLABORADOR</span>
+          <form id="form-colaborador" onSubmit={addColab} className="mt-5 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>{editCbId ? "EDITAR COLABORADOR" : "NUEVO COLABORADOR"}</span>
             <input placeholder="Nombre *" value={cbNombre} onChange={(e) => setCbNombre(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={inputStyle} />
             <div className="grid grid-cols-3 gap-2 mt-2">
               <input placeholder="Servicio" value={cbServicio} onChange={(e) => setCbServicio(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={inputStyle} />
@@ -318,7 +410,10 @@ export default function AdminFinanzas() {
             </div>
             <ErrorBanner message={error} />
             <OkBanner message={ok} />
-            <div className="mt-2"><PillButton type="submit" disabled={cbSaving}>{cbSaving ? "Guardando…" : "Guardar colaborador"}</PillButton></div>
+            <div className="mt-2 flex gap-2">
+              <PillButton type="submit" disabled={cbSaving}>{cbSaving ? "Guardando…" : editCbId ? "Guardar cambios" : "Guardar colaborador"}</PillButton>
+              {editCbId && <PillButton type="button" ghost onClick={limpiarFormCb}>Cancelar</PillButton>}
+            </div>
           </form>
           <div className="space-y-2 mt-4">
             {colabs.map((c) => {
@@ -327,7 +422,10 @@ export default function AdminFinanzas() {
                 <div key={c.id} onClick={() => setSelColab(c)} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${selColab?.id === c.id ? blueLight : cardAlt}`, cursor: "pointer" }}>
                   <div className="flex items-center justify-between">
                     <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{c.nombre}</p>
-                    <b style={{ fontFamily: FONT, fontSize: 13.5, color: white }}>Pagado: {fmtMoney(total)}</b>
+                    <div className="flex items-center gap-3">
+                      <b style={{ fontFamily: FONT, fontSize: 13.5, color: white }}>Pagado: {fmtMoney(total)}</b>
+                      <button onClick={(e) => { e.stopPropagation(); startEditCb(c); }} style={{ fontFamily: FONT, fontSize: 12.5, color: blueLight, fontWeight: 600 }}>Editar</button>
+                    </div>
                   </div>
                   <p style={{ fontFamily: FONT, fontSize: 12.5, color: gray, marginTop: 2 }}>{c.servicio || ""}{c.telefono ? ` · ${c.telefono}` : ""}{c.correo ? ` · ${c.correo}` : ""}</p>
                 </div>
@@ -370,6 +468,7 @@ export default function AdminFinanzas() {
                 </label>
                 {pcArchivo && <p style={{ fontFamily: FONT, fontSize: 12, color: gray, marginTop: 4 }}>Archivo elegido: {pcArchivo.name}</p>}
                 <ErrorBanner message={error} />
+                <OkBanner message={ok} />
                 <div className="mt-2"><PillButton type="submit" disabled={pcSaving}>{pcSaving ? "Guardando…" : "Guardar pago"}</PillButton></div>
               </form>
             </div>

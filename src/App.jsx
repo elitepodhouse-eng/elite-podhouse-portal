@@ -407,9 +407,38 @@ function Tab({ active, onClick, icon: Icon, label }) {
   );
 }
 
-function Shell({ nav, view, setView, children }) {
+// Encabezado de sección del menú (solo aparece cuando el ítem trae `section`).
+function SectionLabel({ children }) {
+  return (
+    <p className="px-4 pt-4 pb-1" style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>{children}</p>
+  );
+}
+
+// Cuenta con la que se entró: visible siempre, para que nunca se confunda
+// la cuenta del estudio con la de un cliente.
+function AccountBlock({ email, role }) {
+  if (!email) return null;
+  return (
+    <div className="px-4 py-3 rounded-xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+      <p style={{ fontFamily: FONT, fontWeight: 700, fontSize: 10.5, color: gray, letterSpacing: 1 }}>{role ? `${role.toUpperCase()} · SESIÓN` : "SESIÓN"}</p>
+      <p style={{ fontFamily: FONT, fontSize: 12.5, color: white, marginTop: 4, wordBreak: "break-all" }}>{email}</p>
+    </div>
+  );
+}
+
+function Shell({ nav, view, setView, children, accountEmail, accountRole }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const logout = () => supabase.auth.signOut();
+  const items = (onPick) => (
+    <>
+      {nav.map((n) => (
+        <React.Fragment key={n.id}>
+          {n.section && <SectionLabel>{n.section}</SectionLabel>}
+          <Tab active={view === n.id} onClick={() => onPick(n.id)} icon={n.icon} label={n.label} />
+        </React.Fragment>
+      ))}
+    </>
+  );
   return (
     <div style={{ minHeight: "100vh", background: navy, display: "flex" }}>
       <aside className="hidden md:flex flex-col w-60 p-4 shrink-0" style={{ borderRight: `1px solid ${cardAlt}` }}>
@@ -418,11 +447,14 @@ function Shell({ nav, view, setView, children }) {
           <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: white }}>Élite Podhouse</span>
         </div>
         <div className="flex flex-col gap-1">
-          {nav.map((n) => <Tab key={n.id} active={view === n.id} onClick={() => setView(n.id)} icon={n.icon} label={n.label} />)}
+          {items((id) => setView(id))}
         </div>
-        <button onClick={logout} className="mt-auto flex items-center gap-2 px-4 py-3" style={{ color: gray }}>
-          <LogOut size={15} /><span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500 }}>Cerrar sesión</span>
-        </button>
+        <div className="mt-auto flex flex-col gap-2">
+          <AccountBlock email={accountEmail} role={accountRole} />
+          <button onClick={logout} className="flex items-center gap-2 px-4 py-3" style={{ color: gray }}>
+            <LogOut size={15} /><span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 500 }}>Cerrar sesión</span>
+          </button>
+        </div>
       </aside>
 
       <div className="md:hidden fixed top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3" style={{ background: navy, borderBottom: `1px solid ${cardAlt}` }}>
@@ -434,7 +466,10 @@ function Shell({ nav, view, setView, children }) {
       </div>
       {menuOpen && (
         <div className="md:hidden fixed top-12 left-0 right-0 z-20 p-3" style={{ background: card, borderBottom: `1px solid ${cardAlt}` }}>
-          {nav.map((n) => <Tab key={n.id} active={view === n.id} onClick={() => { setView(n.id); setMenuOpen(false); }} icon={n.icon} label={n.label} />)}
+          {items((id) => { setView(id); setMenuOpen(false); })}
+          <div className="mt-3">
+            <AccountBlock email={accountEmail} role={accountRole} />
+          </div>
           <Tab active={false} onClick={logout} icon={LogOut} label="Cerrar sesión" />
         </div>
       )}
@@ -1130,9 +1165,10 @@ function History({ sesiones, loading }) {
   );
 }
 
-function ClientPortal({ userId }) {
+function ClientPortal({ userId, email }) {
   const [view, setView] = useState("dashboard");
   const [perfil, setPerfil] = useState(null);
+  const [perfilError, setPerfilError] = useState(null);
   const [sesiones, setSesiones] = useState([]);
   const [notas, setNotas] = useState([]);
   const [episodios, setEpisodios] = useState([]);
@@ -1145,7 +1181,7 @@ function ClientPortal({ userId }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: perfilData }, { data: sesionesData }, { data: notasData }, ep, pg, ct, fc, ab] = await Promise.all([
+    const [{ data: perfilData, error: perfilErr }, { data: sesionesData }, { data: notasData }, ep, pg, ct, fc, ab] = await Promise.all([
       supabase.from("clientes").select("*").eq("id", userId).single(),
       supabase.from("sesiones").select("*").eq("cliente_id", userId).order("fecha", { ascending: false }),
       supabase.from("notas").select("*").eq("cliente_id", userId),
@@ -1158,6 +1194,7 @@ function ClientPortal({ userId }) {
       safeSelect("abonos", supabase.from("abonos").select("*").order("fecha", { ascending: false })),
     ]);
     setPerfil(perfilData);
+    setPerfilError(perfilErr || null);
     setSesiones(sesionesData || []);
     setNotas(notasData || []);
     // La tabla episodios no tiene columna de número: el número es el orden
@@ -1185,8 +1222,51 @@ function ClientPortal({ userId }) {
     { id: "history", label: "Historial", icon: FileText },
   ];
 
+  // Cuenta sin perfil de cliente (p. ej. una cuenta personal del estudio):
+  // antes se mostraba el portal vacío sin explicación. Ahora se dice claro
+  // con qué cuenta se entró y cómo entrar con la correcta.
+  if (!loading && !perfil) {
+    const tablaFalta = perfilError?.code === "PGRST205";
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6 py-10" style={{ background: navy }}>
+        <div className="w-full rounded-2xl p-6" style={{ background: card, border: `1px solid ${cardAlt}`, maxWidth: 480 }}>
+          <div className="flex items-center gap-2.5 mb-6">
+            <Logo />
+            <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 15, color: white }}>Élite Podhouse</span>
+          </div>
+          {tablaFalta ? (
+            <>
+              <Eyebrow>ERROR</Eyebrow>
+              <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white }}>Falta una tabla en la base de datos</h1>
+              <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 10, lineHeight: 1.6 }}>
+                El portal no pudo cargar los clientes. Hay que aplicar las migraciones de la carpeta supabase/migrations en Supabase.
+              </p>
+            </>
+          ) : (
+            <>
+              <Eyebrow>SIN ACCESO</Eyebrow>
+              <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 22, color: white }}>Esta cuenta no tiene perfil de cliente</h1>
+              <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 10, lineHeight: 1.6 }}>
+                Entraste con <b style={{ color: white }}>{email}</b>. Esa cuenta no tiene un perfil de cliente en Élite Podhouse, por eso el portal se ve vacío.
+              </p>
+              <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 10, lineHeight: 1.6 }}>
+                Si eres del estudio, cierra sesión y entra con la cuenta del estudio: <b style={{ color: white }}>elitepodhouse@gmail.com</b>.
+              </p>
+              <p style={{ fontFamily: FONT, fontSize: 14, color: gray, marginTop: 10, lineHeight: 1.6 }}>
+                Si eres cliente y ves este mensaje, escríbenos al 662 132 1405 y lo revisamos.
+              </p>
+              <div className="mt-6">
+                <PillButton full onClick={() => supabase.auth.signOut()}>Cerrar sesión</PillButton>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <Shell nav={nav} view={view} setView={setView}>
+    <Shell nav={nav} view={view} setView={setView} accountEmail={perfil?.usuario ? `@${perfil.usuario}` : email} accountRole="Cliente">
       {view === "dashboard" && <ClientDashboard perfil={perfil} sesiones={sesiones} episodios={episodios} pagos={pagos} facturas={facturas} abonos={abonos} goTo={setView} />}
       {view === "paquete" && <PackageView perfil={perfil} sesiones={sesiones} episodios={episodios} />}
       {view === "entregas" && <DeliveriesView episodios={episodios} loading={loading} missing={tablesMissing} onChanged={load} />}
@@ -2247,27 +2327,27 @@ function AdminNotas() {
   );
 }
 
-function AdminPortal() {
+function AdminPortal({ email }) {
   const [view, setView] = useState("hoy");
   const nav = [
-    { id: "hoy", label: "Hoy", icon: CalIcon },
+    { id: "hoy", label: "Hoy", icon: CalIcon, section: "Operación" },
     { id: "clientes", label: "Clientes", icon: Users },
     { id: "sesiones", label: "Sesiones", icon: CalIcon },
     { id: "entregas", label: "Entregas", icon: Sparkles },
     { id: "produccion", label: "Producción", icon: Package },
-    { id: "pagos", label: "Pagos", icon: Wallet },
-    { id: "propuestas", label: "Propuestas", icon: FileText },
+    { id: "propuestas", label: "Propuestas", icon: FileText, section: "Ventas" },
     { id: "cotizador", label: "Cotizador", icon: FileText },
     { id: "contratos", label: "Contratos", icon: FileText },
     { id: "cobranza", label: "Cobranza", icon: FileText },
-    { id: "finanzas", label: "Finanzas", icon: FileText },
+    { id: "pagos", label: "Pagos", icon: Wallet },
+    { id: "finanzas", label: "Finanzas", icon: FileText, section: "Finanzas" },
     { id: "facturacion", label: "Facturación", icon: FileText },
-    { id: "ajustes", label: "Ajustes", icon: FileText },
+    { id: "ajustes", label: "Ajustes", icon: FileText, section: "Sistema" },
     { id: "tips", label: "Tips y noticias", icon: Newspaper },
     { id: "notas", label: "Agregar nota", icon: FileText },
   ];
   return (
-    <Shell nav={nav} view={view} setView={setView}>
+    <Shell nav={nav} view={view} setView={setView} accountEmail={email} accountRole="Administrador">
       {view === "hoy" && <AdminHoy />}
       {view === "clientes" && <AdminClientes />}
       {view === "sesiones" && <AdminSesiones />}
@@ -2315,5 +2395,5 @@ export default function App() {
 
   // Admin = lista VITE_ADMIN_EMAILS (Tania + Alejandro cuando Tania dé su correo).
   const isAdmin = isAdminEmail(session.user.email);
-  return isAdmin ? <AdminPortal /> : <ClientPortal userId={session.user.id} />;
+  return isAdmin ? <AdminPortal email={session.user.email} /> : <ClientPortal userId={session.user.id} email={session.user.email} />;
 }
