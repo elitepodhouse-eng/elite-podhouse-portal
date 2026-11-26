@@ -4,8 +4,10 @@
 //   { action: "busy", from: "YYYY-MM-DD", to: "YYYY-MM-DD" }
 //     → { busy: { "YYYY-MM-DD": ["09:00", ...] } } con los horarios ocupados
 //       por eventos del calendario del estudio.
-//   { action: "create", fecha, hora, titulo, cliente_nombre?, cliente_correo? }
-//     → crea el evento de 1 hora en el calendario del estudio.
+//   { action: "create", fecha, hora, titulo, cliente_nombre?, cliente_correo?,
+//     duracion?, cliente_telefono?, ubicacion?, tipo? }
+//     → crea el evento en el calendario del estudio. duracion en minutos
+//       (por defecto 60); tipo "visita" cambia el texto de la descripción.
 // Solo responde a clientes con sesión del portal (verifica el token).
 //
 // Secretos (Supabase Dashboard → Edge Functions → Secrets):
@@ -173,7 +175,11 @@ serve(async (req) => {
       }
       const [h, m] = hora.split(":").map(Number);
       const startMs = Date.parse(`${fecha}T00:00:00-07:00`) + (h * 60 + m) * 60000;
-      const endMs = startMs + 3600000;
+      const duracion = Math.max(15, Math.min(480, Number(body.duracion) || 60));
+      const endMs = startMs + duracion * 60000;
+      const prefijo = body.tipo === "visita"
+        ? "Visita al estudio desde el portal Élite Podhouse."
+        : "Reserva desde el portal de clientes Élite Podhouse.";
       const event = await googleFetch(
         accessToken,
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CALENDAR_ID)}/events`,
@@ -181,7 +187,8 @@ serve(async (req) => {
           method: "POST",
           body: JSON.stringify({
             summary: String(body.titulo || "Sesión Élite Podhouse"),
-            description: `Reserva desde el portal de clientes Élite Podhouse.${body.cliente_nombre ? `\nCliente: ${body.cliente_nombre}` : ""}${body.cliente_correo ? `\nCorreo: ${body.cliente_correo}` : ""}`,
+            description: `${prefijo}${body.cliente_nombre ? `\nCliente: ${body.cliente_nombre}` : ""}${body.cliente_correo ? `\nCorreo: ${body.cliente_correo}` : ""}${body.cliente_telefono ? `\nTeléfono: ${body.cliente_telefono}` : ""}`,
+            location: body.ubicacion ? String(body.ubicacion) : undefined,
             start: { dateTime: new Date(startMs).toISOString(), timeZone: TZ },
             end: { dateTime: new Date(endMs).toISOString(), timeZone: TZ },
           }),

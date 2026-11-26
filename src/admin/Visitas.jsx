@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Loader2 } from "lucide-react";
 import { supabase } from "../supabaseClient";
-import { Eyebrow, PillButton, inputStyle, selectStyle, card, cardAlt, white, gray, blueLight, green, red, FONT } from "../lib/ui";
+import { Eyebrow, PillButton, inputStyle, selectStyle, card, cardAlt, white, gray, blueLight, green, red, amber, FONT } from "../lib/ui";
 import { safeSelect, fmtFecha, todayISO, filtrarClientes, waUrl } from "../lib/ops";
 import { generarImagenCita, descargarImagenCita, nombreArchivoCita } from "../lib/citaImagen";
+import { enlaceGoogleCalendar, mensajeWhatsAppVisita } from "../lib/calendarioVisita";
 
 // Registro de visitas al estudio: nombre, fecha y hora obligatorios;
 // teléfono, duración (30 min por defecto) y notas opcionales. El cliente
@@ -25,6 +26,7 @@ export function VisitasPanel() {
   const [vSaving, setVSaving] = useState(false);
   const [preview, setPreview] = useState(null); // { visita, url }
   const [busyId, setBusyId] = useState(null); // id de la visita generando imagen
+  const [gcalAviso, setGcalAviso] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,7 +42,7 @@ export function VisitasPanel() {
 
   const crearVisita = async (e) => {
     e.preventDefault();
-    setError(""); setOkMsg("");
+    setError(""); setOkMsg(""); setGcalAviso(false);
     if (!vNombre || !vFecha || !vHora) { setError("La visita necesita nombre, fecha y hora."); return; }
     setVSaving(true);
     const { data, error: err } = await supabase.from("visitas").insert({
@@ -49,6 +51,21 @@ export function VisitasPanel() {
     }).select().single();
     setVSaving(false);
     if (err) { setError(err.message); return; }
+    // Google Calendar: mejor esfuerzo, como en las sesiones del admin.
+    // La visita queda guardada aunque el evento no se pueda crear.
+    try {
+      const { error: gcalError } = await supabase.functions.invoke("google-calendar", {
+        body: {
+          action: "create", fecha: vFecha, hora: vHora,
+          duracion: parseInt(vDuracion, 10) || 30,
+          titulo: `Visita al estudio – ${vNombre}`,
+          cliente_nombre: vNombre, cliente_telefono: vTelefono || undefined,
+          ubicacion: "Monteverde 186, Colonia Balderrama, Hermosillo, Sonora",
+          tipo: "visita",
+        },
+      });
+      if (gcalError) setGcalAviso(true);
+    } catch { setGcalAviso(true); }
     setVNombre(""); setVTelefono(""); setVCliente(""); setVFecha(""); setVHora(""); setVDuracion("30"); setVNotas("");
     setOkMsg("Visita registrada.");
     load();
@@ -100,6 +117,7 @@ export function VisitasPanel() {
     <div>
       {error && <p style={{ fontFamily: FONT, fontSize: 13, color: red, marginTop: 12 }}>{error}</p>}
       {okMsg && <p style={{ fontFamily: FONT, fontSize: 13, color: green, marginTop: 12 }}>{okMsg}</p>}
+      {gcalAviso && <p style={{ fontFamily: FONT, fontSize: 13, color: amber, marginTop: 12 }}>Visita guardada, pero no se creó el evento en Google Calendar. Puedes agregarlo con el enlace de la visita.</p>}
       <form onSubmit={crearVisita} className="mt-3 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
         <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVA VISITA</span>
         <input placeholder="Nombre de quien visita" value={vNombre} onChange={(e) => setVNombre(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={inputStyle} />
@@ -131,6 +149,8 @@ export function VisitasPanel() {
             <PillButton onClick={() => descargar(preview.visita)} disabled={busyId === preview.visita.id}>
               {busyId === preview.visita.id ? <Loader2 size={15} className="animate-spin" /> : "Descargar imagen de cita"}
             </PillButton>
+            <a href={enlaceGoogleCalendar(preview.visita)} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }}>Agregar a Google Calendar</a>
+            {preview.visita.telefono && <a href={waUrl(preview.visita.telefono, mensajeWhatsAppVisita(preview.visita))} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
             <button onClick={() => setPreview(null)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Cerrar</button>
           </div>
           <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 8 }}>{nombreArchivoCita(preview.visita)}</p>
@@ -141,7 +161,7 @@ export function VisitasPanel() {
         {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
         {!loading && visitas.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Aún no hay visitas registradas.</p>}
         {visitas.map((v) => {
-          const waV = v.telefono ? waUrl(v.telefono, `Hola ${v.nombre}, te confirmamos tu visita a Élite Podhouse el ${fmtFecha(v.fecha)} a las ${v.hora} (${v.duracion || 30} min).`) : "";
+          const waV = v.telefono ? waUrl(v.telefono, mensajeWhatsAppVisita(v)) : "";
           return (
             <div key={v.id} className="flex items-center justify-between p-4 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
               <div>
@@ -153,6 +173,7 @@ export function VisitasPanel() {
                   {busyId === v.id ? "Generando…" : "Imagen de cita"}
                 </button>
                 <button onClick={() => descargar(v)} disabled={busyId === v.id} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Descargar imagen de cita</button>
+                <a href={enlaceGoogleCalendar(v)} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }}>Agregar a Google Calendar</a>
                 {waV && <a href={waV} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
                 <button onClick={() => eliminarVisita(v.id)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Eliminar</button>
               </div>
