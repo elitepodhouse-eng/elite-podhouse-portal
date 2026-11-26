@@ -7,7 +7,7 @@ import {
 import { supabase, isAdminEmail } from "./supabaseClient";
 import { saldoCliente, waUrl } from "./lib/ops";
 import { generarImagenSesion, descargarImagenSesion, nombreArchivoSesion } from "./lib/citaImagen";
-import { enlaceGoogleCalendarSesion, mensajeWhatsAppSesion } from "./lib/calendarioVisita";
+import { enlaceGoogleCalendarSesion, mensajeWhatsAppSesion, mensajeSeguimientoSesion } from "./lib/calendarioVisita";
 import AdminPropuestas from "./admin/Propuestas";
 import AdminCotizador from "./admin/Cotizador";
 import AdminContratos from "./admin/Contratos";
@@ -1673,6 +1673,7 @@ function AdminSesiones() {
           const cancelada = s.estado === "Cancelada";
           const tel = telefonoDe(s);
           const wa = tel ? waUrl(tel, mensajeWhatsAppSesion(s)) : "";
+          const waSeguimiento = tel ? waUrl(tel, mensajeSeguimientoSesion(s)) : "";
           return (
             <div key={s.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
               <div className="flex items-center justify-between">
@@ -1688,6 +1689,7 @@ function AdminSesiones() {
               </div>
               <div className="flex gap-3 mt-3 flex-wrap">
                 {wa && <a href={wa} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
+                {waSeguimiento && <a href={waSeguimiento} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Recordar por WhatsApp (1 día antes)</a>}
                 <button onClick={() => verImagenSesion(s)} disabled={busySesionId === s.id} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
                   {busySesionId === s.id ? "Generando…" : "Imagen de cita"}
                 </button>

@@ -102,3 +102,16 @@ export function mensajeWhatsAppSesion(sesion) {
     "📍 Monteverde 186, col. Balderrama, Hermosillo",
   ].join("\n");
 }
+
+// Mensaje de seguimiento para un día antes de la sesión: solo
+// confirmar si acudirá. Se manda a mano desde la Agenda, cuando
+// ya pasaron días desde la confirmación inicial.
+export function mensajeSeguimientoSesion(sesion) {
+  const nombre = sesion.clientes?.nombre || sesion.nombre || "";
+  return [
+    `Hola ${nombre}, te escribimos de Élite Podhouse para recordarte tu sesión de mañana, ${fmtFecha(sesion.fecha)} a las ${sesion.hora}.`,
+    "¿Nos confirmas que acudirás? Llega 10 minutos antes.",
+    "",
+    "📍 Monteverde 186, col. Balderrama, Hermosillo",
+  ].join("\n");
+}
