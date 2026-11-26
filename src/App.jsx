@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 import { supabase, isAdminEmail } from "./supabaseClient";
 import { saldoCliente, waUrl } from "./lib/ops";
+import { generarImagenSesion, descargarImagenSesion, nombreArchivoSesion } from "./lib/citaImagen";
+import { enlaceGoogleCalendarSesion, mensajeWhatsAppSesion } from "./lib/calendarioVisita";
 import AdminPropuestas from "./admin/Propuestas";
 import AdminCotizador from "./admin/Cotizador";
 import AdminContratos from "./admin/Contratos";
@@ -1501,6 +1503,9 @@ function AdminSesiones() {
   const [reprogId, setReprogId] = useState(null);
   const [reprogFecha, setReprogFecha] = useState("");
   const [reprogHora, setReprogHora] = useState("");
+  // Imagen de cita de la sesión (como las visitas): vista previa y descarga.
+  const [previewSesion, setPreviewSesion] = useState(null); // { sesion, url }
+  const [busySesionId, setBusySesionId] = useState(null);
 
   const now = new Date();
   const hoyISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -1585,6 +1590,22 @@ function AdminSesiones() {
 
   const telefonoDe = (s) => s.telefono || (clientes.find((c) => c.id === s.cliente_id) || {}).telefono || "";
 
+  const verImagenSesion = async (s) => {
+    setBusySesionId(s.id);
+    try {
+      const c = await generarImagenSesion(s);
+      setPreviewSesion({ sesion: s, url: c.toDataURL("image/png") });
+    } catch { setError("No se pudo generar la imagen de cita."); }
+    setBusySesionId(null);
+  };
+
+  const descargarSesion = async (s) => {
+    setBusySesionId(s.id);
+    const ok = await descargarImagenSesion(s);
+    if (!ok) setError("No se pudo generar la imagen de cita.");
+    setBusySesionId(null);
+  };
+
   return (
     <div>
       <Eyebrow>ADMINISTRACIÓN</Eyebrow>
@@ -1628,6 +1649,22 @@ function AdminSesiones() {
         </div>
       </form>
 
+      {previewSesion && (
+        <div className="mt-6 rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
+          <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>IMAGEN DE CITA — {previewSesion.sesion.clientes?.nombre || ""}</span>
+          <img src={previewSesion.url} alt="Imagen de cita" className="w-full rounded-xl mt-3" style={{ maxWidth: 540 }} />
+          <div className="flex gap-3 mt-3 flex-wrap items-center">
+            <PillButton onClick={() => descargarSesion(previewSesion.sesion)} disabled={busySesionId === previewSesion.sesion.id}>
+              {busySesionId === previewSesion.sesion.id ? <Loader2 size={15} className="animate-spin" /> : "Descargar imagen de cita"}
+            </PillButton>
+            <a href={enlaceGoogleCalendarSesion(previewSesion.sesion)} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }}>Agregar a Google Calendar</a>
+            {telefonoDe(previewSesion.sesion) && <a href={waUrl(telefonoDe(previewSesion.sesion), mensajeWhatsAppSesion(previewSesion.sesion))} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
+            <button onClick={() => setPreviewSesion(null)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Cerrar</button>
+          </div>
+          <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 8 }}>{nombreArchivoSesion(previewSesion.sesion)}</p>
+        </div>
+      )}
+
       <div className="mt-6 space-y-3">
         <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>SESIONES</span>
         {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
@@ -1635,7 +1672,7 @@ function AdminSesiones() {
         {sesiones.map((s) => {
           const cancelada = s.estado === "Cancelada";
           const tel = telefonoDe(s);
-          const wa = tel ? waUrl(tel, `Hola ${s.clientes?.nombre || ""}, te confirmamos tu sesión en Élite Podhouse el ${fmtFecha(s.fecha)} a las ${s.hora}. Llega 10 minutos antes.`) : "";
+          const wa = tel ? waUrl(tel, mensajeWhatsAppSesion(s)) : "";
           return (
             <div key={s.id} className="rounded-2xl p-4" style={{ background: card, border: `1px solid ${cardAlt}` }}>
               <div className="flex items-center justify-between">
@@ -1651,6 +1688,11 @@ function AdminSesiones() {
               </div>
               <div className="flex gap-3 mt-3 flex-wrap">
                 {wa && <a href={wa} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
+                <button onClick={() => verImagenSesion(s)} disabled={busySesionId === s.id} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight, background: "none", border: "none", padding: 0, cursor: "pointer" }}>
+                  {busySesionId === s.id ? "Generando…" : "Imagen de cita"}
+                </button>
+                <button onClick={() => descargarSesion(s)} disabled={busySesionId === s.id} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Descargar imagen de cita</button>
+                <a href={enlaceGoogleCalendarSesion(s)} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight }}>Agregar a Google Calendar</a>
                 {!cancelada && (
                   <>
                     <button onClick={() => { setReprogId(reprogId === s.id ? null : s.id); setReprogFecha(s.fecha); setReprogHora(s.hora); }} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: blueLight, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Reprogramar</button>

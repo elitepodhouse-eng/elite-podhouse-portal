@@ -3,6 +3,7 @@
 // hora local de Hermosillo (ctz=America/Hermosillo, sin sufijo Z), y el
 // mensaje de WhatsApp que lo incluye con "Agrégala a tu calendario:".
 import { fechaLarga, rangoHora } from "./citaImagen";
+import { fmtFecha } from "./ops";
 
 const ADDRESS_CAL = "Monteverde 186, col. Balderrama, Hermosillo, Sonora";
 
@@ -58,5 +59,46 @@ export function mensajeWhatsAppVisita(visita) {
     "Si necesitas reprogramar, avísanos con tiempo.",
     "",
     "Te esperamos. @elitepodhouse",
+  ].join("\n");
+}
+
+// ---------- Sesiones (no visitas) ----------
+// Mismo patrón que las visitas, pero para una sesión de grabación.
+// Duración: 60 minutos (las sesiones del estudio son de 1 hora).
+// El mensaje de WhatsApp conserva tal cual la frase aprobada por Tania:
+// "Hola {nombre}, te confirmamos tu sesión en Élite Podhouse el
+// {fecha} a las {hora}. Llega 10 minutos antes." y solo le agrega
+// debajo el enlace de Google Calendar y la dirección.
+export function enlaceGoogleCalendarSesion(sesion) {
+  const nombre = sesion.clientes?.nombre || sesion.nombre || "";
+  const duracion = 60;
+  const visita = { fecha: sesion.fecha, hora: sesion.hora, duracion, nombre, telefono: sesion.telefono || "", notas: "" };
+  const { fechaFin, finHora } = finVisita(visita);
+  const detalles = [
+    sesion.titulo || `Sesión — ${nombre}`,
+    sesion.set ? `Set ${sesion.set}` : "",
+    sesion.paquete ? `Paquete ${sesion.paquete}` : "",
+    "Llega 10 minutos antes.",
+  ].filter(Boolean).join("\n");
+  const q = new URLSearchParams({
+    action: "TEMPLATE",
+    text: sesion.titulo || `Sesión — ${nombre}`,
+    dates: `${compact(sesion.fecha, sesion.hora)}/${compact(fechaFin, finHora)}`,
+    details: detalles,
+    location: ADDRESS_CAL,
+    ctz: "America/Hermosillo",
+  });
+  return `https://calendar.google.com/calendar/render?${q.toString()}`;
+}
+
+export function mensajeWhatsAppSesion(sesion) {
+  const nombre = sesion.clientes?.nombre || sesion.nombre || "";
+  return [
+    `Hola ${nombre}, te confirmamos tu sesión en Élite Podhouse el ${fmtFecha(sesion.fecha)} a las ${sesion.hora}. Llega 10 minutos antes.`,
+    "",
+    "Agrégala a tu calendario:",
+    enlaceGoogleCalendarSesion(sesion),
+    "",
+    "📍 Monteverde 186, col. Balderrama, Hermosillo",
   ].join("\n");
 }
