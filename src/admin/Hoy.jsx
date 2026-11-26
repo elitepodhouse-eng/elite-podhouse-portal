@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Eyebrow, SectionTitle, EmptyNote, MissingTablesBanner, cardAlt, white, gray, blueLight, green, amber, red, FONT, blue, blueDeep, navy } from "../lib/ui";
 import { safeSelect, fmtMoney, fmtFecha, todayISO, r2, filtrarClientes, MESES } from "../lib/ops";
+import logoElite from "../assets/logo-elite-podhouse-oficial-transparente.png";
 
 // Rediseño 26 nov 2026: azul y blanco, no todo oscuro.
 // La lógica y las consultas son las mismas de antes; solo cambia la presentación.
@@ -169,9 +170,7 @@ export default function AdminHoy() {
             <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 4 }}>{fechaLarga}</p>
             <p style={{ fontFamily: FONT, fontSize: 13.5, color: white, marginTop: 10, fontWeight: 600 }}>{resumen}</p>
           </div>
-          <span className="hidden sm:flex items-center justify-center shrink-0" style={{ width: 44, height: 44, borderRadius: 14, background: "rgba(255,255,255,0.18)" }}>
-            <SaludoIcon size={22} color={white} />
-          </span>
+          <img src={logoElite} alt="Élite Podhouse" className="block shrink-0" style={{ height: 40, width: "auto" }} />
         </div>
         {proxima && (
           <div className="flex items-center justify-between gap-3 mt-4 px-3 py-3 rounded-2xl" style={{ background: "rgba(255,255,255,0.96)" }}>
