@@ -14,6 +14,7 @@ import AdminHoy from "./admin/Hoy";
 import AdminFinanzas from "./admin/Finanzas";
 import AdminFacturacion from "./admin/Facturacion";
 import AdminAjustes from "./admin/Ajustes";
+import AdminVisitas, { VisitasPanel } from "./admin/Visitas";
 import ClienteDetalle from "./admin/ClienteDetalle";
 import EpisodioDetalle from "./admin/EpisodioDetalle";
 
@@ -1481,8 +1482,6 @@ function AdminClientes() {
 function AdminSesiones() {
   const clientes = useClientesList();
   const [sesiones, setSesiones] = useState([]);
-  const [visitas, setVisitas] = useState([]);
-  const [visitasMissing, setVisitasMissing] = useState(false);
   const [tieneExtras, setTieneExtras] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -1502,15 +1501,6 @@ function AdminSesiones() {
   const [reprogId, setReprogId] = useState(null);
   const [reprogFecha, setReprogFecha] = useState("");
   const [reprogHora, setReprogHora] = useState("");
-  // Nueva visita.
-  const [vNombre, setVNombre] = useState("");
-  const [vTelefono, setVTelefono] = useState("");
-  const [vCliente, setVCliente] = useState("");
-  const [vFecha, setVFecha] = useState("");
-  const [vHora, setVHora] = useState("");
-  const [vDuracion, setVDuracion] = useState("30");
-  const [vNotas, setVNotas] = useState("");
-  const [vSaving, setVSaving] = useState(false);
 
   const now = new Date();
   const hoyISO = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -1521,9 +1511,6 @@ function AdminSesiones() {
     setSesiones(data || []);
     const probe = await supabase.from("sesiones").select("paquete").limit(1);
     setTieneExtras(!probe.error);
-    const v = await safeSelect("visitas", supabase.from("visitas").select("*").order("fecha", { ascending: false }));
-    setVisitas(v.data);
-    setVisitasMissing(v.missing);
     setLoading(false);
   }, []);
 
@@ -1592,28 +1579,6 @@ function AdminSesiones() {
 
   const eliminar = async (s) => {
     const { error: err } = await supabase.from("sesiones").delete().eq("id", s.id);
-    if (err) setError(err.message);
-    else load();
-  };
-
-  const crearVisita = async (e) => {
-    e.preventDefault();
-    setError(""); setOkMsg("");
-    if (!vNombre || !vFecha || !vHora) { setError("La visita necesita nombre, fecha y hora."); return; }
-    setVSaving(true);
-    const { error: err } = await supabase.from("visitas").insert({
-      cliente_id: vCliente || null, nombre: vNombre, telefono: vTelefono || null,
-      fecha: vFecha, hora: vHora, duracion: parseInt(vDuracion, 10) || 30, notas: vNotas || null,
-    });
-    setVSaving(false);
-    if (err) { setError(err.message); return; }
-    setVNombre(""); setVTelefono(""); setVCliente(""); setVFecha(""); setVHora(""); setVDuracion("30"); setVNotas("");
-    setOkMsg("Visita registrada.");
-    load();
-  };
-
-  const eliminarVisita = async (id) => {
-    const { error: err } = await supabase.from("visitas").delete().eq("id", id);
     if (err) setError(err.message);
     else load();
   };
@@ -1713,53 +1678,7 @@ function AdminSesiones() {
 
       <div className="mt-8">
         <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>VISITAS AL ESTUDIO</span>
-        {visitasMissing ? (
-          <p style={{ fontFamily: FONT, fontSize: 13, color: gray, marginTop: 8, lineHeight: 1.55 }}>
-            El registro de visitas aún no está activado en la base (tabla `visitas`, migración 004 pendiente). Cuando se aplique, aquí se registran las visitas con nombre, teléfono, fecha, hora y duración.
-          </p>
-        ) : (
-          <>
-            <form onSubmit={crearVisita} className="mt-3 rounded-2xl p-5" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-              <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>NUEVA VISITA</span>
-              <input placeholder="Nombre de quien visita" value={vNombre} onChange={(e) => setVNombre(e.target.value)} className="w-full rounded-xl px-3 py-2.5 outline-none mt-3" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <input placeholder="Teléfono" value={vTelefono} onChange={(e) => setVTelefono(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
-                <select value={vCliente} onChange={(e) => setVCliente(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
-                  <option value="">Cliente (opcional)</option>
-                  {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre || c.correo}</option>)}
-                </select>
-                <input type="date" min={hoyISO} value={vFecha} onChange={(e) => setVFecha(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
-                <input type="time" value={vHora} onChange={(e) => setVHora(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
-                <select value={vDuracion} onChange={(e) => setVDuracion(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }}>
-                  <option value="30">30 minutos</option>
-                  <option value="45">45 minutos</option>
-                  <option value="60">60 minutos</option>
-                </select>
-                <input placeholder="Notas (opcional)" value={vNotas} onChange={(e) => setVNotas(e.target.value)} className="rounded-xl px-3 py-2.5 outline-none" style={{ background: navy, border: `1px solid ${cardAlt}`, color: white, fontFamily: FONT, fontSize: 14 }} />
-              </div>
-              <div className="mt-3">
-                <PillButton type="submit" disabled={vSaving}>{vSaving ? <Loader2 size={15} className="animate-spin" /> : "Registrar visita"}</PillButton>
-              </div>
-            </form>
-            <div className="space-y-2 mt-3">
-              {visitas.map((v) => {
-                const waV = v.telefono ? waUrl(v.telefono, `Hola ${v.nombre}, te confirmamos tu visita a Élite Podhouse el ${fmtFecha(v.fecha)} a las ${v.hora} (${v.duracion || 30} min).`) : "";
-                return (
-                  <div key={v.id} className="flex items-center justify-between p-4 rounded-2xl" style={{ background: card, border: `1px solid ${cardAlt}` }}>
-                    <div>
-                      <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 14, color: white }}>{v.nombre}</p>
-                      <p style={{ fontFamily: FONT, fontSize: 11.5, color: gray, marginTop: 3 }}>{fmtFecha(v.fecha)} · {v.hora} · {v.duracion || 30} min{v.notas ? ` · ${v.notas}` : ""}</p>
-                    </div>
-                    <div className="flex gap-3">
-                      {waV && <a href={waV} target="_blank" rel="noreferrer" style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: green }}>Confirmar por WhatsApp</a>}
-                      <button onClick={() => eliminarVisita(v.id)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12, color: gray, background: "none", border: "none", padding: 0, cursor: "pointer" }}>Eliminar</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
+        <VisitasPanel />
       </div>
     </div>
   );
@@ -2333,6 +2252,7 @@ function AdminPortal({ email }) {
     { id: "hoy", label: "Hoy", icon: CalIcon, section: "Operación" },
     { id: "clientes", label: "Clientes", icon: Users },
     { id: "sesiones", label: "Sesiones", icon: CalIcon },
+    { id: "visitas", label: "Visitas", icon: Users },
     { id: "entregas", label: "Entregas", icon: Sparkles },
     { id: "produccion", label: "Producción", icon: Package },
     { id: "propuestas", label: "Propuestas", icon: FileText, section: "Ventas" },
@@ -2351,6 +2271,7 @@ function AdminPortal({ email }) {
       {view === "hoy" && <AdminHoy />}
       {view === "clientes" && <AdminClientes />}
       {view === "sesiones" && <AdminSesiones />}
+      {view === "visitas" && <AdminVisitas />}
       {view === "entregas" && <AdminEntregas />}
       {view === "produccion" && <AdminProduccion />}
       {view === "pagos" && <AdminPagos />}
