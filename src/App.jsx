@@ -886,34 +886,106 @@ function PaymentsView({ pagos, facturas, abonos, perfil, loading, missing }) {
   );
 }
 
+// Ondas de audio decorativas (mismo motivo de la imagen de cita).
+function Ondas({ color, n = 24, maxH = 30 }) {
+  const bars = [];
+  for (let i = 0; i < n; i++) {
+    const h = Math.round(6 + Math.abs(Math.sin(i * 0.55 + 1) * Math.cos(i * 0.21)) * (maxH - 8) + (i % 7 === 0 ? 5 : 0));
+    bars.push(<span key={i} style={{ display: "inline-block", width: 3, height: h, borderRadius: 2, background: color, marginRight: 3, verticalAlign: "middle", opacity: i % 9 === 4 ? 0.55 : 1 }} />);
+  }
+  return <div style={{ lineHeight: 1 }}>{bars}</div>;
+}
+
+function fechaPublicacion(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", year: "numeric", timeZone: "America/Hermosillo" }).format(d);
+}
+
+function minLectura(texto) {
+  const palabras = String(texto || "").trim().split(/\s+/).filter(Boolean).length;
+  return `${Math.max(1, Math.round(palabras / 200))} min de lectura`;
+}
+
+function esNuevo(iso) {
+  if (!iso) return false;
+  const d = new Date(iso).getTime();
+  if (Number.isNaN(d)) return false;
+  return Date.now() - d < 7 * 24 * 3600 * 1000;
+}
+
 function TipsView({ contenidos, loading, missing }) {
-  const tips = contenidos.filter((c) => c.tipo === "tip");
-  const noticias = contenidos.filter((c) => c.tipo === "noticia");
+  const [expandido, setExpandido] = useState({});
+  const destacado = contenidos[0] || null;
+  const resto = contenidos.slice(1);
+  const toggle = (id) => setExpandido((p) => ({ ...p, [id]: !p[id] }));
+
+  const cuerpoCorto = (c) => {
+    const txt = c.cuerpo || "";
+    if (txt.length <= 160 || expandido[c.id]) return { texto: txt, recortado: false };
+    return { texto: `${txt.slice(0, 160).trim()}…`, recortado: true };
+  };
+
+  const tarjeta = (c, grande) => {
+    const esNoticia = c.tipo === "noticia";
+    const { texto, recortado } = cuerpoCorto(c);
+    return (
+      <div key={c.id} className="rounded-2xl overflow-hidden" style={esNoticia ? { background: gradBlue } : { background: card, border: `1px solid ${cardAlt}` }}>
+        <div style={{ height: 6, background: esNoticia ? "rgba(255,255,255,0.35)" : `linear-gradient(90deg, ${blueDeep}, ${blue})` }} />
+        <div className="p-5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="px-2.5 py-1 rounded-full" style={{ background: esNoticia ? "rgba(255,255,255,0.2)" : blueSoft, color: esNoticia ? "white" : blueLight, fontFamily: FONT, fontSize: 10.5, fontWeight: 700, letterSpacing: 1 }}>
+              {esNoticia ? "NOTICIA DEL ESTUDIO" : "TIP"}
+            </span>
+            {esNuevo(c.created_at) && <span className="px-2.5 py-1 rounded-full" style={{ background: "rgba(245,166,35,0.2)", color: "#F5C46A", fontFamily: FONT, fontSize: 10.5, fontWeight: 700 }}>NUEVO</span>}
+          </div>
+          <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: grande ? 21 : 17, color: white, marginTop: 12, lineHeight: 1.3 }}>{c.titulo}</p>
+          <p style={{ fontFamily: FONT, fontSize: 12, color: esNoticia ? "rgba(255,255,255,0.75)" : gray, marginTop: 6 }}>
+            {fechaPublicacion(c.created_at)}{fechaPublicacion(c.created_at) ? " · " : ""}{minLectura(c.cuerpo)}
+          </p>
+          <p style={{ fontFamily: FONT, fontSize: 13.5, color: esNoticia ? "rgba(255,255,255,0.9)" : gray, marginTop: 8, lineHeight: 1.6 }}>{texto}</p>
+          {(recortado || expandido[c.id]) && (
+            <button onClick={() => toggle(c.id)} style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12.5, color: esNoticia ? "white" : blueLight, background: "none", border: "none", padding: 0, marginTop: 6, cursor: "pointer" }}>
+              {expandido[c.id] ? "Ver menos" : "Leer más"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div>
       <Eyebrow>TIPS Y NOTICIAS</Eyebrow>
       <h1 style={{ fontFamily: FONT, fontWeight: 600, fontSize: 26, color: white }}>Tips y noticias</h1>
+      <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6 }}>Ideas cortas para grabar mejor y novedades del estudio.</p>
       <div className="mt-6 space-y-4">
         {loading && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Cargando…</p>}
         {!loading && missing && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Los tips y noticias aún no están activados en el portal.</p>}
         {!loading && !missing && contenidos.length === 0 && <p style={{ fontFamily: FONT, fontSize: 13, color: gray }}>Próximamente: tips y noticias del estudio.</p>}
-        {tips.map((t, i) => (
-          <Card key={t.id}>
-            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: gray, letterSpacing: 1 }}>TIP DE ESTA SEMANA</span>
-            <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 18, color: white, marginTop: 8 }}>
-              <span style={{ display: "inline-flex", width: 30, height: 30, borderRadius: 10, background: blueSoft, color: blueLight, alignItems: "center", justifyContent: "center", fontSize: 14, marginRight: 10 }}>{i + 1}</span>
-              {t.titulo}
-            </p>
-            <p style={{ fontFamily: FONT, fontSize: 13.5, color: gray, marginTop: 6, lineHeight: 1.55 }}>{t.cuerpo}</p>
-          </Card>
-        ))}
-        {noticias.map((n) => (
-          <Card key={n.id} blue>
-            <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.8)", letterSpacing: 1 }}>NOTICIA DEL ESTUDIO</span>
-            <p style={{ fontFamily: FONT, fontWeight: 600, fontSize: 18, color: white, marginTop: 8 }}>{n.titulo}</p>
-            <p style={{ fontFamily: FONT, fontSize: 13.5, color: "rgba(255,255,255,0.85)", marginTop: 6, lineHeight: 1.55 }}>{n.cuerpo}</p>
-          </Card>
-        ))}
+        {destacado && (
+          <div className="rounded-2xl overflow-hidden" style={{ background: gradBlue }}>
+            <div className="p-5">
+              <div className="flex items-center justify-between gap-2">
+                <span style={{ fontFamily: FONT, fontWeight: 700, fontSize: 11, color: "rgba(255,255,255,0.85)", letterSpacing: 1 }}>
+                  {destacado.tipo === "noticia" ? "NOTICIA DESTACADA" : "TIP DE LA SEMANA"}
+                </span>
+                <Ondas color="rgba(255,255,255,0.85)" n={18} maxH={26} />
+              </div>
+              <p style={{ fontFamily: FONT, fontWeight: 700, fontSize: 22, color: white, marginTop: 12, lineHeight: 1.25 }}>{destacado.titulo}</p>
+              <p style={{ fontFamily: FONT, fontSize: 12, color: "rgba(255,255,255,0.75)", marginTop: 6 }}>
+                {fechaPublicacion(destacado.created_at)}{fechaPublicacion(destacado.created_at) ? " · " : ""}{minLectura(destacado.cuerpo)}
+              </p>
+              <p style={{ fontFamily: FONT, fontSize: 14, color: "rgba(255,255,255,0.92)", marginTop: 8, lineHeight: 1.6 }}>{destacado.cuerpo}</p>
+            </div>
+          </div>
+        )}
+        {resto.length > 0 && (
+          <div className="grid gap-3 md:grid-cols-2">
+            {resto.map((c) => tarjeta(c, false))}
+          </div>
+        )}
       </div>
     </div>
   );
