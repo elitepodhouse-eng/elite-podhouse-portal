@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabaseClient";
-import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, Kpi, inputStyle, labelStyle, card, cardAlt, white, gray, blueLight, green, amber, red, FONT } from "../lib/ui";
+import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, Kpi, inputStyle, labelStyle, card, cardAlt, white, gray, blueLight, green, greenBg, amber, red, FONT } from "../lib/ui";
 import { safeSelect, safeLoadClientes, fmtMoney, fmtFecha, todayISO, r2 } from "../lib/ops";
 
 // Tramos RESICO (mapa §2.8): tasa ISR según ingresos del mes.

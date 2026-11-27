@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabaseClient";
-import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, inputStyle, selectStyle, labelStyle, card, cardAlt, white, gray, blueLight, blueSoft, green, greenBg, amber, amberBg, red, FONT } from "../lib/ui";
+import { Eyebrow, PillButton, ErrorBanner, OkBanner, SectionTitle, EmptyNote, MissingTablesBanner, inputStyle, selectStyle, labelStyle, card, cardAlt, navy, white, gray, blueLight, blueSoft, green, greenBg, amber, amberBg, red, FONT } from "../lib/ui";
 import { safeSelect, safeLoadClientes, waUrl, fmtMoney, fmtFecha, todayISO, useConfig, precioPaquete, precioReels, PAQUETES, r2 } from "../lib/ops";
 import { pdfCotizacion } from "../lib/pdf";
 
